@@ -17,3 +17,4 @@ app/frontend/dist/
 app/backend/data/*.db
 .DS_Store
 Thumbs.db
+.archon/logs/
