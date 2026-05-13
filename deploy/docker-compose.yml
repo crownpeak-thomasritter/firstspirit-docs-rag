@@ -1,0 +1,109 @@
+# FirstSpirit Docs RAG — local + single-host docker stack.
+#
+# Brings up Postgres (pgvector) and the single FastAPI+frontend app container.
+# Compose-level vars (POSTGRES_PASSWORD, OPENROUTER_API_KEY, paths) come from
+# `deploy/.env` — copy `deploy/.env.example` and fill it in before `up`.
+#
+# Run from the repo root:
+#     docker compose -f deploy/docker-compose.yml up -d --build
+#
+# Then visit http://localhost:8000.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: firstspirit-docs-rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-docs_rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-docs_rag}
+    ports:
+      # Loopback-only on the host so a misconfigured firewall can't expose
+      # Postgres to the public internet. Tools on the host (psql, DBeaver)
+      # can still reach it via 127.0.0.1:5433.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docs_rag} -d ${POSTGRES_DB:-docs_rag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: firstspirit-docs-rag:latest
+    container_name: firstspirit-docs-rag-app
+    restart: unless-stopped
+    environment:
+      # --- LLM / embeddings ------------------------------------------------
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY must be set in deploy/.env}
+      CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4.6}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
+
+      # --- Database --------------------------------------------------------
+      # Resolved from the POSTGRES_* values; the app sees a single connection
+      # string and never needs to know about the host's port mapping.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-docs_rag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-docs_rag}
+
+      # --- RAG tuning (all optional with sensible defaults) ----------------
+      RETRIEVAL_EXPANSION_WINDOW: ${RETRIEVAL_EXPANSION_WINDOW:-1}
+      RETRIEVAL_MAX_PER_DOCUMENT: ${RETRIEVAL_MAX_PER_DOCUMENT:-3}
+      CITATIONS_MAX_COUNT: ${CITATIONS_MAX_COUNT:-10}
+      LLM_TOOLS_ENABLED: ${LLM_TOOLS_ENABLED:-true}
+      LLM_TOOLS_MAX_PER_TURN: ${LLM_TOOLS_MAX_PER_TURN:-6}
+      DOCUMENT_TOOL_MAX_CHARS: ${DOCUMENT_TOOL_MAX_CHARS:-120000}
+      CATALOG_ENABLED: ${CATALOG_ENABLED:-false}
+      CATALOG_TIER: ${CATALOG_TIER:-standard}
+      CATALOG_CACHE_TTL_SECONDS: ${CATALOG_CACHE_TTL_SECONDS:-3600}
+
+      # --- Ingestion -------------------------------------------------------
+      # Inside the container these paths are fixed; the host-side bind
+      # mounts below decide what actually lives there. SOURCE_VAULT_PATH is
+      # left blank by default — the vault mount is optional.
+      SOURCE_URL_LIST_PATH: "/app/sources/URL List.md"
+      SOURCE_VAULT_PATH: "${SOURCE_VAULT_PATH_IN_CONTAINER:-}"
+      CRAWLER_USER_AGENT: "${CRAWLER_USER_AGENT:-FirstSpiritDocsRAG/1.0 (+contact: you@example.com)}"
+      CRAWLER_REQUEST_DELAY_MS: ${CRAWLER_REQUEST_DELAY_MS:-500}
+      CRAWLER_MAX_RETRIES: ${CRAWLER_MAX_RETRIES:-4}
+      CRAWLER_TIMEOUT_SECONDS: ${CRAWLER_TIMEOUT_SECONDS:-30.0}
+      DEFAULT_SOURCE_TYPE: ${DEFAULT_SOURCE_TYPE:-firstspirit}
+
+      # --- HTTP / CORS -----------------------------------------------------
+      # When the bundled frontend is served from the same origin, no CORS
+      # headers are needed at all. Override only if you point a separate
+      # frontend at this backend.
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"
+      FRONTEND_DIST: /app/frontend/dist
+    ports:
+      - "${APP_HOST_PORT:-8000}:8000"
+    volumes:
+      # URL list: a single markdown file with one URL per line. The default
+      # path resolves to deploy/sources/ inside the repo, which we ship with
+      # a placeholder so the mount always exists.
+      - ${URL_LIST_HOST_PATH:-./sources}:/app/sources:ro
+      # Vault (optional). Default points at deploy/sources/empty-vault, which
+      # the repo ships empty so the mount succeeds even when no vault is
+      # configured. Override VAULT_HOST_PATH in .env to point at your own
+      # Obsidian directory, and set SOURCE_VAULT_PATH_IN_CONTAINER=/app/vault
+      # so the ingester actually reads it.
+      - ${VAULT_HOST_PATH:-./sources/empty-vault}:/app/vault:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+volumes:
+  postgres_data:

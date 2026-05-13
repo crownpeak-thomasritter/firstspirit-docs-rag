@@ -1,0 +1,44 @@
+# Keep the build context lean and prevent secrets / dev cruft from landing
+# in an image layer. Paths are relative to the build context (the repo root,
+# per deploy/docker-compose.yml → build.context: ..).
+
+# Git / editor
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Top-level docs (not needed at runtime — README and CLAUDE.md don't ship in the image)
+*.md
+!app/backend/README.md
+
+# Python
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Node / frontend
+**/node_modules
+**/.vite
+app/frontend/dist
+
+# Local data + secrets — never leak these into an image layer.
+**/.env
+**/.env.*
+!**/.env.example
+app/backend/data/*.db
+app/backend/data/*.db-*
+
+# Test output
+**/coverage
+**/.coverage
+**/htmlcov
+
+# Deploy artefacts themselves don't belong inside the image; the Dockerfile
+# copies only what it needs from app/.
+deploy
