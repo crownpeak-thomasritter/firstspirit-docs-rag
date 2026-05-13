@@ -1,9 +1,13 @@
 # FirstSpirit Docs RAG — local + single-host docker stack.
 #
-# Single FastAPI+frontend container backed by SQLite (chat + metadata) and
-# Qdrant Cloud (vectors, server-side hybrid retrieval). Compose-level vars
-# come from `deploy/.env` — copy `deploy/.env.example` and fill it in before
-# `up`.
+# FastAPI+frontend container backed by SQLite (chat + metadata) and Qdrant
+# (vectors, server-side hybrid retrieval). The bundled `qdrant` service is
+# meant for local development and testing; in production point QDRANT_URL +
+# QDRANT_API_KEY at Qdrant Cloud and leave the local container idle (or omit
+# it from the compose invocation with `--scale qdrant=0`).
+#
+# Compose-level vars come from `deploy/.env` — copy `deploy/.env.example` and
+# fill it in before `up`. Sensible defaults let `up` work without any edits.
 #
 # Run from the repo root:
 #     docker compose -f deploy/docker-compose.yml up -d --build
@@ -11,6 +15,20 @@
 # Then visit http://localhost:8000.
 
 services:
+  qdrant:
+    # Local Qdrant for dev/testing. Production should override QDRANT_URL +
+    # QDRANT_API_KEY in deploy/.env to point at Qdrant Cloud; this service can
+    # then be left running idle or skipped via `--scale qdrant=0`.
+    image: qdrant/qdrant:v1.13.0
+    container_name: firstspirit-docs-rag-qdrant
+    restart: unless-stopped
+    ports:
+      # Loopback-only on the host so the dev Qdrant isn't accidentally exposed.
+      - "127.0.0.1:6333:6333"   # REST/HTTP API + dashboard
+      - "127.0.0.1:6334:6334"   # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   app:
     build:
       context: ..
@@ -33,9 +51,14 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
       LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
 
-      # --- Vector store (Qdrant Cloud) ------------------------------------
-      QDRANT_URL: ${QDRANT_URL:?QDRANT_URL must be set in deploy/.env}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in deploy/.env}
+      # --- Vector store (Qdrant) ------------------------------------------
+      # Defaults talk to the bundled `qdrant` service over the compose
+      # network. For production, override these in deploy/.env to hit Qdrant
+      # Cloud (e.g. QDRANT_URL=https://<cluster>.cloud.qdrant.io and a real
+      # QDRANT_API_KEY). The local container has no auth, so a blank API key
+      # is valid for dev.
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-firstspirit_docs}
 
       # --- Database (SQLite) -----------------------------------------------
@@ -75,6 +98,8 @@ services:
       # frontend at this backend.
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"
       FRONTEND_DIST: /app/frontend/dist
+    depends_on:
+      - qdrant
     ports:
       - "${APP_HOST_PORT:-8000}:8000"
     volumes:
@@ -102,3 +127,4 @@ services:
 
 volumes:
   sqlite_data:
+  qdrant_data:

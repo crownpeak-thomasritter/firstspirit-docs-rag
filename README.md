@@ -16,7 +16,7 @@ Single-tenant, single-team. No login, no per-user accounts — the whole stack i
 - **Citations** that group multiple chunks from the same document into a single chip and deep-link to the source URL.
 - **Streamed responses** over SSE with content-agnostic `[c:<chunk_id>]` markers stripped before they reach the client.
 - **Pluggable LLM + embedding provider** — pick OpenRouter (default) or OpenAI native independently for chat and embeddings via `LLM_PROVIDER` / `EMBEDDING_PROVIDER`.
-- **SQLite for chat + metadata, Qdrant Cloud for vectors.** No Postgres container to maintain; schema is managed by Alembic and `alembic upgrade head` runs automatically on startup.
+- **SQLite for chat + metadata, Qdrant for vectors.** A local Qdrant container ships with the compose stack for dev/testing; production swaps in Qdrant Cloud via two env vars. No Postgres container to maintain; SQLite schema is managed by Alembic and `alembic upgrade head` runs automatically on startup.
 
 ---
 
@@ -29,16 +29,33 @@ git clone <this-repo>
 cd firstspirit-docs-rag
 
 cp deploy/.env.example deploy/.env
-# Edit deploy/.env — at minimum set:
-#   QDRANT_URL=https://<your-cluster>.cloud.qdrant.io
-#   QDRANT_API_KEY=<your Qdrant Cloud key>
+# Edit deploy/.env — at minimum set one of:
 #   OPENROUTER_API_KEY=<your OpenRouter key>   # if LLM/EMBEDDING_PROVIDER=openrouter (default)
 #   OPENAI_API_KEY=<your OpenAI key>            # if LLM/EMBEDDING_PROVIDER=openai
+#
+# Qdrant defaults to the bundled `qdrant` container — no edit needed for
+# local dev. To use Qdrant Cloud instead, see the "Switching to Qdrant
+# Cloud" section below.
 
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Open <http://localhost:8000>.
+Open <http://localhost:8000>. The Qdrant dashboard is on <http://localhost:6333/dashboard>.
+
+### Switching to Qdrant Cloud (production)
+
+The bundled `qdrant` service is for dev. In production, point `QDRANT_URL` + `QDRANT_API_KEY` in `deploy/.env` at your managed cluster and the app will skip the local container:
+
+```ini
+QDRANT_URL=https://<your-cluster>.cloud.qdrant.io
+QDRANT_API_KEY=<your Qdrant Cloud key>
+```
+
+If you don't want the unused local Qdrant container running at all, bring the stack up with `--scale qdrant=0`:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build --scale qdrant=0
+```
 
 ### Adding sources
 
@@ -79,15 +96,22 @@ curl http://localhost:8000/api/sources/documents
 
 ## Manual dev (no Docker)
 
-Useful when you want hot reload on the backend or frontend separately. SQLite is local (the data directory is created on first start) and Qdrant Cloud is managed — no other services need to be brought up by hand.
+Useful when you want hot reload on the backend or frontend separately. SQLite is local (the data directory is created on first start). For Qdrant, the easiest option is to bring up just the bundled container:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d qdrant
+```
+
+This exposes Qdrant on `127.0.0.1:6333`, which the root `.env.example` already points at. For Qdrant Cloud instead, override `QDRANT_URL` + `QDRANT_API_KEY`.
 
 Copy the root template and fill it in:
 
 ```bash
 cp .env.example .env
 # Set DATABASE_URL=sqlite+aiosqlite:///./data/app.db
-# Set QDRANT_URL=https://<your-cluster>.cloud.qdrant.io
-# Set QDRANT_API_KEY=<your Qdrant Cloud key>
+# QDRANT_URL defaults to http://localhost:6333 (bundled container) — override
+#   to https://<your-cluster>.cloud.qdrant.io for Qdrant Cloud
+# Set QDRANT_API_KEY=<your Qdrant Cloud key> (leave blank for local Qdrant)
 # Set OPENROUTER_API_KEY=... (or OPENAI_API_KEY=... when using OpenAI native)
 ```
 

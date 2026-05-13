@@ -341,13 +341,14 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 
 ## Deployment
 
-The pivot ships as a single Docker Compose stack (`deploy/docker-compose.yml`):
+The pivot ships as a Docker Compose stack (`deploy/docker-compose.yml`):
 
 | Service | Image | Port | Purpose |
 |---|---|---|---|
 | `firstspirit-docs-rag-app` | Local `deploy/Dockerfile` build | `localhost:8000` | FastAPI + built frontend in one container; SQLite at `/app/data/app.db` on a named volume |
+| `firstspirit-docs-rag-qdrant` | `qdrant/qdrant:v1.13.0` | `127.0.0.1:6333` (HTTP) / `127.0.0.1:6334` (gRPC) | Local Qdrant for dev/testing; storage on a named `qdrant_data` volume |
 
-The vector store is external — Qdrant Cloud is accessed over HTTPS using `QDRANT_URL` + `QDRANT_API_KEY`.
+In production, override `QDRANT_URL` + `QDRANT_API_KEY` in `deploy/.env` to point at Qdrant Cloud. The bundled `qdrant` service can then be left running idle, or skipped at startup with `docker compose ... up -d --scale qdrant=0`. The app reaches the local container via the compose-network DNS name `qdrant`; from the host (manual dev) it's `localhost:6333`.
 
 The app container publishes 8000 directly to the host — there's no reverse proxy in front. If you ever sit this behind one (Caddy, nginx, Cloudflare Tunnel), edit the `CMD` in `deploy/Dockerfile` to add `--proxy-headers --forwarded-allow-ips=<proxy-ip>` so Starlette will trust forwarded client IPs from that proxy and *only* that proxy.
 
