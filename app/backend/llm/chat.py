@@ -1,7 +1,10 @@
-"""OpenRouter streaming chat completions wrapper.
+"""Streaming chat completions wrapper — provider-agnostic.
 
-Streams tokens from anthropic/claude-sonnet-4.6 via OpenRouter, with optional
-tool-use support (e.g. `get_video_transcript` in backend.rag.tools).
+Streams tokens from the configured chat provider (OpenRouter by default;
+OpenAI native when ``LLM_PROVIDER=openai``). Both share the OpenAI wire
+protocol, so the only per-provider divergences are (a) the SDK client
+instance, and (b) whether to attach Anthropic ``cache_control`` blocks to
+system content (OpenAI native rejects unknown keys with HTTP 400).
 
 `stream_chat(messages, context, tools=None, tool_executor=None, max_tool_calls=0)`
 yields SSE strings `data: <token>\\n\\n`. When tools are passed, runs a
@@ -17,7 +20,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any, cast
 
-from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI
+from openai import APIConnectionError, APIError, APIStatusError
 from openai.types.chat import ChatCompletionMessageParam
 
 from backend.config import (
@@ -25,21 +28,11 @@ from backend.config import (
     CATALOG_TIER,
     CHAT_MODEL,
     LLM_REASONING_EFFORT,
-    OPENROUTER_API_KEY,
-    OPENROUTER_BASE_URL,
 )
+from backend.llm import providers
 from backend.rag import catalog
 
 logger = logging.getLogger(__name__)
-
-_async_client: AsyncOpenAI | None = None
-
-
-def _get_async_client() -> AsyncOpenAI:
-    global _async_client
-    if _async_client is None:
-        _async_client = AsyncOpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
-    return _async_client
 
 
 _BASE_SYSTEM_PROMPT = """\
@@ -57,8 +50,8 @@ _TOOL_GUIDANCE = """\
 You have four retrieval tools. You MUST call at least one before answering any question about the library content:
 
 - `search_documents(query, top_k=10)` — hybrid search (keyword + semantic via RRF). Your default. Start here.
-- `keyword_search_documents(query, top_k=10)` — exact-term matching (tsvector FTS). Best for proper nouns, acronyms, API names, configuration keys.
-- `semantic_search_documents(query, top_k=10)` — conceptual similarity (vector cosine). Best when the user's wording may not match the docs literally.
+- `keyword_search_documents(query, top_k=10)` — exact-term matching (BM25 sparse vector index). Best for proper nouns, acronyms, API names, configuration keys.
+- `semantic_search_documents(query, top_k=10)` — conceptual similarity (dense vector cosine similarity). Best when the user's wording may not match the docs literally.
 - `get_document(document_id)` — full body of one document. Use this whenever search confidently identifies a single page that addresses the asked topic. Chunk-level search results often skip the elaboration the full page captures, so the get_document call is what lets you give precise, accurate detail rather than a partial guess.
 
 Strategy:
@@ -130,6 +123,7 @@ async def build_system_prompt(
         text += _TOOL_GUIDANCE.format(max_per_turn=max_tool_calls)
 
     blocks: list[dict] = [{"type": "text", "text": text}]
+    use_cache_control = providers.is_openrouter_chat()
 
     if CATALOG_ENABLED:
         documents = await catalog.get_catalog()
@@ -138,11 +132,14 @@ async def build_system_prompt(
                 d for d in documents if (d.get("source_type") or "") in allowed_source_types
             ]
         if documents:
-            blocks.append(catalog.build_catalog_block(documents, CATALOG_TIER))
+            blocks.append(
+                catalog.build_catalog_block(documents, CATALOG_TIER, cache=use_cache_control)
+            )
             return blocks
 
-    # No catalog block — anchor cache on the base block instead
-    blocks[0]["cache_control"] = {"type": "ephemeral"}
+    # No catalog block — anchor cache on the base block instead (OpenRouter only).
+    if use_cache_control:
+        blocks[0]["cache_control"] = {"type": "ephemeral"}
     return blocks
 
 
@@ -199,7 +196,7 @@ async def stream_chat(
     catalog block is filtered to the source tiers the current user is
     permitted to see. ``None`` shows every document.
     """
-    client = _get_async_client()
+    client = providers.get_async_chat_client()
     tools_active = bool(tools) and tool_executor is not None and max_tool_calls > 0
     system_blocks = await build_system_prompt(
         max_tool_calls=max_tool_calls if tools_active else 0,
@@ -411,9 +408,9 @@ async def stream_chat(
         yield "data: [DONE]\n\n"
 
     except (APIError, APIConnectionError, APIStatusError) as exc:
-        logger.error("OpenRouter streaming API error: %s", exc)
+        logger.error("Chat streaming API error: %s", exc)
         if tokens_yielded == 0:
-            raise RuntimeError(f"OpenRouter streaming failed: {exc}") from exc
+            raise RuntimeError(f"Chat streaming failed: {exc}") from exc
         yield f"data: {json.dumps({'error': str(exc)})}\n\n"
     except Exception as exc:
         logger.error("Unexpected error during streaming: %s", exc)

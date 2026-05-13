@@ -43,18 +43,21 @@ def invalidate_catalog() -> None:
     logger.info("Document catalog cache invalidated.")
 
 
-def build_catalog_block(documents: list[dict], tier: str) -> dict:
-    """Format the document list as a content block with ``cache_control``.
+def build_catalog_block(documents: list[dict], tier: str, *, cache: bool = True) -> dict:
+    """Format the document list as a content block.
 
     Each entry includes the internal ``id`` so the model can pass it directly
-    to ``get_document`` when a user references a page by name or topic. Without
-    the id in the catalog the model has to round-trip through search to
-    discover it, which defeats the point of the catalog.
+    to ``get_document`` when a user references a page by name or topic.
 
     Args:
         documents: List of document dicts with ``id`` and ``title``; ``url``
             and ``content_path`` are both optional.
         tier: ``"standard"`` (~5-min ephemeral) or ``"extended"`` (1-hour TTL).
+        cache: When True (default) and the request goes via OpenRouter to an
+            Anthropic model, attach a ``cache_control`` block so the catalog
+            is cached. Pass ``False`` for OpenAI native — the OpenAI API
+            rejects extra keys with HTTP 400, and OpenAI's automatic prompt
+            cache works transparently without an explicit block.
 
     Returns:
         A content block dict suitable for inclusion in the system message's
@@ -73,12 +76,13 @@ def build_catalog_block(documents: list[dict], tier: str) -> dict:
         url_part = f" — {url}" if url else ""
         lines.append(f"{idx}. {title} (id={doc_id}){url_part}")
 
-    cache_control: dict = {"type": "ephemeral"}
-    if tier == "extended":
-        cache_control["ttl"] = CATALOG_CACHE_TTL_SECONDS
-
-    return {
+    block: dict = {
         "type": "text",
         "text": "\n".join(lines),
-        "cache_control": cache_control,
     }
+    if cache:
+        cache_control: dict = {"type": "ephemeral"}
+        if tier == "extended":
+            cache_control["ttl"] = CATALOG_CACHE_TTL_SECONDS
+        block["cache_control"] = cache_control
+    return block

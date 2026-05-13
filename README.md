@@ -8,14 +8,15 @@ Single-tenant, single-team. No login, no per-user accounts — the whole stack i
 
 ## What you get
 
-- **Hybrid retrieval** — Reciprocal Rank Fusion over Postgres `tsvector` (keyword) and `pgvector` cosine similarity (semantic). Top-k = 5 by default.
+- **Hybrid retrieval** — Qdrant's server-side RRF over a dense vector half (1536-dim cosine, OpenAI `text-embedding-3-small`) and a sparse BM25 vector half (Qdrant/bm25 via FastEmbed). Single round-trip via the Query API. Top-k = 5 by default; RRF `k=60`.
 - **Two ingestion pipelines:**
-  - **URL list** — a markdown file with one URL per line. The crawler fetches each page (HTML → markdown via `trafilatura`, PDFs via `pymupdf4llm`), chunks with Docling's `HybridChunker` (cl100k_base, 512-token max), and embeds via OpenRouter.
+  - **URL list** — a markdown file with one URL per line. The crawler fetches each page (HTML → markdown via `trafilatura`, PDFs via `pymupdf4llm`), chunks with Docling's `HybridChunker` (cl100k_base, 512-token max), embeds via the configured provider, then dual-writes metadata to SQLite and vectors+payload to Qdrant.
   - **Vault** — recursively reads an Obsidian-style directory of markdown files, honours YAML frontmatter (`title`, `description`, `lang`, `source`), and ingests the body the same way.
 - **Tool-calling LLM** — the chat model can issue `search_documents`, `keyword_search_documents`, `semantic_search_documents`, and `get_document` calls during a turn (capped at 6 per turn by default).
 - **Citations** that group multiple chunks from the same document into a single chip and deep-link to the source URL.
 - **Streamed responses** over SSE with content-agnostic `[c:<chunk_id>]` markers stripped before they reach the client.
-- **Postgres-only persistence**, schema managed by Alembic — `alembic upgrade head` runs automatically on startup.
+- **Pluggable LLM + embedding provider** — pick OpenRouter (default) or OpenAI native independently for chat and embeddings via `LLM_PROVIDER` / `EMBEDDING_PROVIDER`.
+- **SQLite for chat + metadata, Qdrant Cloud for vectors.** No Postgres container to maintain; schema is managed by Alembic and `alembic upgrade head` runs automatically on startup.
 
 ---
 
@@ -29,8 +30,10 @@ cd firstspirit-docs-rag
 
 cp deploy/.env.example deploy/.env
 # Edit deploy/.env — at minimum set:
-#   POSTGRES_PASSWORD=<choose anything>
-#   OPENROUTER_API_KEY=<your OpenRouter key>
+#   QDRANT_URL=https://<your-cluster>.cloud.qdrant.io
+#   QDRANT_API_KEY=<your Qdrant Cloud key>
+#   OPENROUTER_API_KEY=<your OpenRouter key>   # if LLM/EMBEDDING_PROVIDER=openrouter (default)
+#   OPENAI_API_KEY=<your OpenAI key>            # if LLM/EMBEDDING_PROVIDER=openai
 
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
@@ -76,18 +79,39 @@ curl http://localhost:8000/api/sources/documents
 
 ## Manual dev (no Docker)
 
-Useful when you want hot reload on the backend or frontend separately. Postgres still has to be running — easiest is to bring up just that service:
+Useful when you want hot reload on the backend or frontend separately. SQLite is local (the data directory is created on first start) and Qdrant Cloud is managed — no other services need to be brought up by hand.
 
-```bash
-docker compose -f deploy/docker-compose.yml up -d postgres
-```
-
-Then copy the root template and fill it in:
+Copy the root template and fill it in:
 
 ```bash
 cp .env.example .env
-# Set DATABASE_URL=postgresql://docs_rag:<password>@127.0.0.1:5433/docs_rag
-# Set OPENROUTER_API_KEY=...
+# Set DATABASE_URL=sqlite+aiosqlite:///./data/app.db
+# Set QDRANT_URL=https://<your-cluster>.cloud.qdrant.io
+# Set QDRANT_API_KEY=<your Qdrant Cloud key>
+# Set OPENROUTER_API_KEY=... (or OPENAI_API_KEY=... when using OpenAI native)
+```
+
+### Choosing a provider
+
+Both halves of the LLM stack are independently configurable:
+
+| Env var | Values | Default |
+|---|---|---|
+| `LLM_PROVIDER` | `openrouter` \| `openai` | `openrouter` |
+| `EMBEDDING_PROVIDER` | `openrouter` \| `openai` | `openrouter` |
+
+`LLM_PROVIDER=openrouter` keeps Anthropic prompt-cache support (`cache_control: {"type": "ephemeral"}` blocks) on the system prompt; `LLM_PROVIDER=openai` strips those blocks (OpenAI native rejects extra keys with HTTP 400) and relies on OpenAI's automatic prompt cache instead.
+
+### Migrating from a Postgres install
+
+`scripts/migrate_pg_to_qdrant.py` is a one-shot, idempotent CLI for users who already have data in the legacy Postgres+pgvector setup. It reads documents and chunks from a Postgres DSN, inserts the metadata into SQLite, and upserts dense vectors + payloads to Qdrant. The BM25 sparse vectors are re-derived locally via FastEmbed.
+
+```bash
+uv run --with asyncpg python scripts/migrate_pg_to_qdrant.py \
+    --pg-dsn postgresql://docs_rag:pw@localhost:5433/docs_rag \
+    --sqlite-path ./data/app.db \
+    --qdrant-url https://<your-cluster>.cloud.qdrant.io \
+    --qdrant-api-key <key>
 ```
 
 **Backend** (from the repo root):
@@ -123,26 +147,27 @@ Visit <http://localhost:5173>. The Vite proxy forwards `/api/*` to the backend o
 │                      │      │  routes/  ──▶  ingest/  ──▶  rag/      │
 └──────────────────────┘      │     │                       chunker    │
                               │     │                       embeddings │
-                              │     │                       retriever  │
-                              │     ▼                       (RRF over  │
-                              │   db/repository.py           tsvector  │
-                              │     │                        + pgvector)│
+                              │     │                       vector_store
+                              │     │                       (Qdrant)   │
                               │     ▼                       tools      │
-                              │   asyncpg pool   ──▶  llm/openrouter   │
-                              │                       (Claude Sonnet)  │
+                              │   db/repository.py   ──▶  llm/chat     │
+                              │   (aiosqlite)              (OpenRouter │
+                              │     │                       OR OpenAI) │
+                              │     ▼                                  │
                               └────────────────────────────────────────┘
-                                              │
-                                              ▼
-                                  ┌────────────────────────┐
-                                  │   Postgres + pgvector  │
-                                  │  documents, chunks,    │
-                                  │  conversations,        │
-                                  │  messages, sync runs   │
-                                  └────────────────────────┘
+                                       │                  │
+                            ┌──────────▼───────┐ ┌────────▼─────────┐
+                            │     SQLite       │ │   Qdrant Cloud   │
+                            │  documents,      │ │   dense + BM25   │
+                            │  chunks,         │ │   vectors,       │
+                            │  conversations,  │ │   payload =      │
+                            │  messages,       │ │   chunk metadata │
+                            │  sync runs       │ │                  │
+                            └──────────────────┘ └──────────────────┘
 ```
 
-- **Ingest** — `POST /api/sources/sync` reads either the URL list or the vault, extracts markdown, chunks via Docling, embeds via OpenRouter, and writes to `documents` + `chunks` (with content-hash idempotency on re-runs).
-- **Retrieve** — At chat time, the user's query is embedded once and reused across tool calls (in-process cache). The hybrid retriever runs keyword + semantic searches in parallel and fuses them via RRF.
+- **Ingest** — `POST /api/sources/sync` reads either the URL list or the vault, extracts markdown, chunks via Docling, embeds via the configured provider, then writes chunk metadata to SQLite and vectors+payload to Qdrant in lockstep.
+- **Retrieve** — At chat time, the user's query is embedded once and reused across tool calls. The hybrid retriever delegates to Qdrant's Query API with `prefetch=[dense, sparse]` + `fusion=RRF`, returning a single ranked list in one round-trip.
 - **Generate** — `POST /api/conversations/{id}/messages` opens an SSE stream, runs the tool-calling loop, strips citation markers, attaches the `sources` event, and persists the final assistant message with its citations.
 
 ---

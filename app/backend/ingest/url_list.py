@@ -31,7 +31,7 @@ from pathlib import Path
 
 from backend.config import DEFAULT_SOURCE_TYPE, SOURCE_URL_LIST_PATH
 from backend.db import repository
-from backend.rag import document_chunker
+from backend.rag import document_chunker, vector_store
 from backend.rag.embeddings import embed_batch
 from backend.services import crawler, extractor
 
@@ -201,8 +201,12 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
 
     embeddings = await asyncio.to_thread(embed_batch, [c.content for c in chunks])
 
-    payload = [
+    # Generate chunk_ids client-side so the same id lands in both SQLite and
+    # Qdrant. The SQLite repository accepts the supplied chunk_id; the Qdrant
+    # vector_store uses it as the point id.
+    chunk_payload = [
         {
+            "chunk_id": repository._new_id(),
             "content": c.content,
             "embedding": emb,
             "chunk_index": c.chunk_index,
@@ -214,29 +218,60 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
         for c, emb in zip(chunks, embeddings, strict=True)
     ]
 
+    title = extracted.title or (existing.get("title") if existing else None) or url
+
     if existing:
         await repository.update_document_crawl_metadata(
             existing["id"],
-            title=extracted.title or existing.get("title") or url,
+            title=title,
             lang=extracted.lang,
             etag=result.etag,
             last_modified=result.last_modified,
             content_hash=content_hash,
         )
-        await repository.replace_chunks_for_document(
-            existing["id"], payload, source_type=source_type
+        document_id = existing["id"]
+        outcome = "updated"
+    else:
+        doc = await repository.create_document(
+            title=title,
+            description="",
+            url=url,
+            source_type=source_type,
+            lang=extracted.lang,
+            etag=result.etag,
+            last_modified=result.last_modified,
+            content_hash=content_hash,
         )
-        return "updated"
+        document_id = doc["id"]
+        outcome = "ingested"
 
-    doc = await repository.create_document(
-        title=extracted.title or url,
-        description="",
-        url=url,
-        source_type=source_type,
-        lang=extracted.lang,
-        etag=result.etag,
-        last_modified=result.last_modified,
-        content_hash=content_hash,
+    await repository.replace_chunks_for_document(
+        document_id, chunk_payload, source_type=source_type
     )
-    await repository.replace_chunks_for_document(doc["id"], payload, source_type=source_type)
-    return "ingested"
+
+    # Augment chunks with document metadata so Qdrant payloads carry it (no
+    # second SQLite lookup at retrieval time).
+    qdrant_chunks = [
+        {
+            **c,
+            "source_type": source_type,
+            "document_title": title,
+            "document_url": url,
+            "document_content_path": None,
+        }
+        for c in chunk_payload
+    ]
+    try:
+        await vector_store.upsert_chunks(document_id=document_id, chunks=qdrant_chunks)
+    except Exception as exc:
+        # Roll back the SQLite chunks so the two stores don't diverge. Best-effort
+        # Qdrant cleanup in case some points were upserted before the failure.
+        logger.error("Qdrant upsert failed for %s; rolling back SQLite chunks: %s", url, exc)
+        try:
+            await vector_store.delete_document(document_id)
+        except Exception as cleanup_exc:
+            logger.warning("Qdrant cleanup also failed for %s: %s", url, cleanup_exc)
+        await repository.replace_chunks_for_document(document_id, [], source_type=source_type)
+        raise
+
+    return outcome

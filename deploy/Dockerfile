@@ -57,11 +57,11 @@ COPY --chown=app:app app/backend/ ./backend/
 # Pull the built frontend from stage 1 into /app/frontend/dist.
 COPY --from=frontend-build --chown=app:app /src/frontend/dist /app/frontend/dist
 
-# Provide a writable data dir for anything the app needs to persist locally
-# (logs, scratch caches). The Postgres-backed schema lives in the postgres
-# service; this directory exists only so the non-root user has somewhere to
-# write if a future feature wants temp scratch.
-RUN mkdir -p /app/data && chown -R app:app /app
+# Provide a writable data dir. SQLite (chat + metadata) lives at
+# /app/data/app.db; the FastEmbed BM25 ONNX model is cached at
+# /app/data/fastembed-cache. The compose file mounts the `sqlite_data`
+# named volume at /app/data so both survive container restarts.
+RUN mkdir -p /app/data /app/data/fastembed-cache && chown -R app:app /app
 
 USER app
 
@@ -70,7 +70,7 @@ ENV FRONTEND_DIST=/app/frontend/dist \
 
 EXPOSE 8000
 
-# Healthcheck hits /api/health, which itself runs a Postgres query — so a
+# Healthcheck hits /api/health, which itself counts rows in SQLite — so a
 # green status proves the app is genuinely ready, not just that the process
 # is listening.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \

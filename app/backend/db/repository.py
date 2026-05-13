@@ -1,14 +1,17 @@
 """
-Repository layer — all database access for the FirstSpirit docs RAG.
+Repository layer — all SQLite access for the FirstSpirit docs RAG.
 
-No raw SQL lives outside this module. Backed by asyncpg via the pool exposed
-from ``backend.db.postgres``. The schema is created by Alembic migration
-``0001_initial`` — see that file for the table shapes referenced below.
+No raw SQL lives outside this module. Backed by ``aiosqlite`` via the helper
+exposed from ``backend.db.sqlite``. The schema is created by Alembic
+migration ``0001_initial`` — see that file for the table shapes.
 
-Names mirror the original DynaChat repository where the behavior is identical
-(conversations, messages, users-related book-keeping) so the protected
-auth/messages modules drop in unchanged. The new vocabulary lives in the
-``documents`` and ``document_chunks`` sections.
+Vector storage (dense + sparse) and hybrid retrieval live in
+``backend.rag.vector_store`` against Qdrant; this module no longer carries
+any vector or full-text-search code.
+
+The ``_acquire()`` context manager auto-commits on clean exit and rolls back
+on exception, so individual functions don't have to remember
+``await conn.commit()`` after every INSERT/UPDATE/DELETE.
 """
 
 from __future__ import annotations
@@ -19,25 +22,71 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import asyncpg
+import aiosqlite
 
-from backend.db.postgres import get_pg_pool
+from backend.db.sqlite import _acquire
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "_acquire",
+    "count_chunks",
+    "count_documents",
+    "create_conversation",
+    "create_document",
+    "create_message",
+    "create_sync_item",
+    "create_sync_run",
+    "delete_conversation",
+    "delete_document_cascade",
+    "get_chunk_neighbors",
+    "get_conversation",
+    "get_document",
+    "get_document_by_content_path",
+    "get_document_by_url",
+    "list_chunks_for_document",
+    "list_conversations",
+    "list_documents",
+    "list_documents_admin",
+    "list_messages",
+    "list_sync_items_for_run",
+    "list_sync_runs",
+    "replace_chunks_for_document",
+    "search_conversations_by_title",
+    "search_documents_admin",
+    "touch_conversation",
+    "update_conversation_title",
+    "update_document_crawl_metadata",
+    "update_sync_item_outcome",
+    "update_sync_run",
+]
 
 
 def _new_id() -> str:
     return str(uuid.uuid4())
 
 
-def _now() -> datetime:
-    """Aware UTC ``datetime`` — required by asyncpg for TIMESTAMPTZ columns."""
-    return datetime.now(UTC)
+def _now() -> str:
+    """ISO-8601 UTC timestamp — the wire format SQLite stores in TEXT columns."""
+    return datetime.now(UTC).isoformat()
 
 
-def _acquire() -> asyncpg.pool.PoolAcquireContext:
-    """Pool acquire context. Use as ``async with _acquire() as conn:``."""
-    return get_pg_pool().acquire()
+async def _fetchall(conn: aiosqlite.Connection, sql: str, params: tuple = ()) -> list[dict]:
+    async with conn.execute(sql, params) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def _fetchone(conn: aiosqlite.Connection, sql: str, params: tuple = ()) -> dict | None:
+    async with conn.execute(sql, params) as cur:
+        row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def _execute(conn: aiosqlite.Connection, sql: str, params: tuple = ()) -> int:
+    """Execute a write and return ``cur.rowcount`` (used to detect 0-row updates)."""
+    async with conn.execute(sql, params) as cur:
+        return cur.rowcount
 
 
 # ---------------------------------------------------------------------------
@@ -63,29 +112,32 @@ async def create_document(
     now = _now()
     metadata_json = json.dumps(metadata or {})
     async with _acquire() as conn:
-        await conn.execute(
+        await _execute(
+            conn,
             """
             INSERT INTO documents (
                 id, title, description, url, content_path, source_type,
                 lang, etag, last_modified, content_hash, metadata,
                 last_crawled_at, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            doc_id,
-            title,
-            description,
-            url,
-            content_path,
-            source_type,
-            lang,
-            etag,
-            last_modified,
-            content_hash,
-            metadata_json,
-            now,
-            now,
-            now,
+            (
+                doc_id,
+                title,
+                description,
+                url,
+                content_path,
+                source_type,
+                lang,
+                etag,
+                last_modified,
+                content_hash,
+                metadata_json,
+                now,
+                now,
+                now,
+            ),
         )
     return {
         "id": doc_id,
@@ -107,21 +159,22 @@ async def create_document(
 
 async def get_document(document_id: str) -> dict | None:
     async with _acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM documents WHERE id = $1", document_id)
+        row = await _fetchone(conn, "SELECT * FROM documents WHERE id = ?", (document_id,))
     return _hydrate_document(row) if row else None
 
 
 async def get_document_by_url(url: str) -> dict | None:
     async with _acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM documents WHERE url = $1", url)
+        row = await _fetchone(conn, "SELECT * FROM documents WHERE url = ?", (url,))
     return _hydrate_document(row) if row else None
 
 
 async def get_document_by_content_path(content_path: str) -> dict | None:
     async with _acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM documents WHERE content_path = $1",
-            content_path,
+        row = await _fetchone(
+            conn,
+            "SELECT * FROM documents WHERE content_path = ?",
+            (content_path,),
         )
     return _hydrate_document(row) if row else None
 
@@ -139,18 +192,15 @@ async def update_document_crawl_metadata(
 ) -> bool:
     """Patch crawl-derived metadata after a successful re-fetch.
 
-    Only the columns named in the call are written — None means "leave as is".
-    Updates ``last_crawled_at`` and ``updated_at`` to now unconditionally.
+    Only the columns named in the call are written — ``None`` means "leave
+    as is". Updates ``last_crawled_at`` and ``updated_at`` to now unconditionally.
     """
     sets: list[str] = []
     params: list[Any] = []
-    idx = 1
 
     def _push(column: str, value: Any) -> None:
-        nonlocal idx
-        sets.append(f"{column} = ${idx}")
+        sets.append(f"{column} = ?")
         params.append(value)
-        idx += 1
 
     if title is not None:
         _push("title", title)
@@ -165,43 +215,38 @@ async def update_document_crawl_metadata(
     if content_hash is not None:
         _push("content_hash", content_hash)
     if metadata is not None:
-        sets.append(f"metadata = ${idx}::jsonb")
-        params.append(json.dumps(metadata))
-        idx += 1
+        _push("metadata", json.dumps(metadata))
 
     now = _now()
-    sets.append(f"last_crawled_at = ${idx}")
-    params.append(now)
-    idx += 1
-    sets.append(f"updated_at = ${idx}")
-    params.append(now)
-    idx += 1
-
+    _push("last_crawled_at", now)
+    _push("updated_at", now)
     params.append(document_id)
-    sql = f"UPDATE documents SET {', '.join(sets)} WHERE id = ${idx}"
+    sql = f"UPDATE documents SET {', '.join(sets)} WHERE id = ?"
     async with _acquire() as conn:
-        result: str = await conn.execute(sql, *params)
-    return result != "UPDATE 0"
+        rowcount = await _execute(conn, sql, tuple(params))
+    return rowcount > 0
 
 
 async def list_documents() -> list[dict]:
     """List documents for the catalog and ``/api/documents``."""
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT id, title, description, url, content_path, source_type,
                    lang, last_crawled_at, created_at
             FROM documents
             ORDER BY created_at DESC
-            """
+            """,
         )
-    return [dict(r) for r in rows]
+    return rows
 
 
 async def list_documents_admin() -> list[dict]:
     """Documents with chunk_count, newest first."""
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT d.id, d.title, d.description, d.url, d.content_path,
                    d.source_type, d.lang, d.last_crawled_at, d.created_at,
@@ -209,45 +254,45 @@ async def list_documents_admin() -> list[dict]:
                        AS chunk_count
             FROM documents d
             ORDER BY d.created_at DESC
-            """
+            """,
         )
-    return [dict(r) for r in rows]
+    return rows
 
 
 async def search_documents_admin(q: str, limit: int = 20) -> list[dict]:
     pattern = f"%{q}%"
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT d.id, d.title, d.description, d.url, d.content_path,
                    d.source_type, d.lang, d.last_crawled_at, d.created_at,
                    (SELECT COUNT(*) FROM document_chunks c WHERE c.document_id = d.id)
                        AS chunk_count
             FROM documents d
-            WHERE d.title ILIKE $1 OR d.description ILIKE $1 OR d.url ILIKE $1
+            WHERE d.title LIKE ? OR d.description LIKE ? OR d.url LIKE ?
             ORDER BY d.created_at DESC
-            LIMIT $2
+            LIMIT ?
             """,
-            pattern,
-            limit,
+            (pattern, pattern, pattern, limit),
         )
-    return [dict(r) for r in rows]
+    return rows
 
 
 async def delete_document_cascade(document_id: str) -> bool:
     async with _acquire() as conn:
-        result: str = await conn.execute("DELETE FROM documents WHERE id = $1", document_id)
-        return result != "DELETE 0"
+        rowcount = await _execute(conn, "DELETE FROM documents WHERE id = ?", (document_id,))
+    return rowcount > 0
 
 
 async def count_documents() -> int:
     async with _acquire() as conn:
-        row = await conn.fetchrow("SELECT COUNT(*) FROM documents")
-    return row[0] if row else 0
+        row = await _fetchone(conn, "SELECT COUNT(*) AS n FROM documents")
+    return int(row["n"]) if row else 0
 
 
-def _hydrate_document(row: asyncpg.Record) -> dict:
-    """Convert an asyncpg Record to a dict; deserialise ``metadata`` JSON."""
+def _hydrate_document(row: dict) -> dict:
+    """Deserialise the ``metadata`` JSON column. ``row`` is already a dict."""
     d = dict(row)
     meta = d.get("metadata")
     if isinstance(meta, str):
@@ -262,27 +307,21 @@ def _hydrate_document(row: asyncpg.Record) -> dict:
 
 async def list_chunks_for_document(document_id: str) -> list[dict]:
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
-            SELECT id, document_id, content, embedding, chunk_index,
+            SELECT id, document_id, content, chunk_index,
                    section_path, anchor, char_start, char_end, source_type
             FROM document_chunks
-            WHERE document_id = $1
+            WHERE document_id = ?
             ORDER BY chunk_index
             """,
-            document_id,
+            (document_id,),
         )
-    result: list[dict] = []
-    for r in rows:
-        d = dict(r)
-        d["embedding"] = json.loads(d["embedding"])
-        d["section_path"] = (
-            json.loads(d["section_path"])
-            if isinstance(d["section_path"], str)
-            else d["section_path"]
-        )
-        result.append(d)
-    return result
+    for d in rows:
+        if isinstance(d.get("section_path"), str):
+            d["section_path"] = json.loads(d["section_path"]) if d["section_path"] else []
+    return rows
 
 
 async def get_chunk_neighbors(
@@ -299,7 +338,8 @@ async def get_chunk_neighbors(
     min_index = max(0, chunk_index - window)
     max_index = chunk_index + window
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT c.id, c.document_id, c.content, c.chunk_index,
                    c.section_path, c.anchor, c.char_start, c.char_end,
@@ -308,26 +348,21 @@ async def get_chunk_neighbors(
                    d.source_type AS document_source_type
             FROM document_chunks c
             JOIN documents d ON d.id = c.document_id
-            WHERE c.document_id = $1 AND c.chunk_index >= $2 AND c.chunk_index <= $3
+            WHERE c.document_id = ? AND c.chunk_index >= ? AND c.chunk_index <= ?
             ORDER BY c.chunk_index ASC
             """,
-            document_id,
-            min_index,
-            max_index,
+            (document_id, min_index, max_index),
         )
-    out: list[dict] = []
-    for r in rows:
-        d = dict(r)
+    for d in rows:
         if isinstance(d.get("section_path"), str):
-            d["section_path"] = json.loads(d["section_path"])
-        out.append(d)
-    return out
+            d["section_path"] = json.loads(d["section_path"]) if d["section_path"] else []
+    return rows
 
 
 async def count_chunks() -> int:
     async with _acquire() as conn:
-        row = await conn.fetchrow("SELECT COUNT(*) FROM document_chunks")
-    return row[0] if row else 0
+        row = await _fetchone(conn, "SELECT COUNT(*) AS n FROM document_chunks")
+    return int(row["n"]) if row else 0
 
 
 async def replace_chunks_for_document(
@@ -338,111 +373,45 @@ async def replace_chunks_for_document(
 ) -> None:
     """Atomically replace all chunks for *document_id*.
 
-    Each entry in *chunks* must have keys: ``content``, ``embedding``,
-    ``chunk_index``, ``section_path``, ``anchor``, ``char_start``, ``char_end``.
-    Caller must finish chunking + embedding BEFORE invoking so a crawler or
-    OpenRouter failure cannot leave the document chunkless.
+    Each entry in *chunks* must have keys: ``content``, ``chunk_index``,
+    ``section_path``, ``anchor``, ``char_start``, ``char_end``. If a chunk
+    dict carries ``chunk_id``, that value is used as the row primary key so
+    the same id can be reused on the Qdrant side; otherwise a fresh UUID is
+    generated. Caller must finish chunking BEFORE invoking so a crawler or
+    embedder failure cannot leave the document chunkless.
+
+    The vectors themselves live in Qdrant — see
+    ``rag.vector_store.upsert_chunks`` for the parallel write.
     """
-    async with _acquire() as conn, conn.transaction():
-        await conn.execute("DELETE FROM document_chunks WHERE document_id = $1", document_id)
+    async with _acquire() as conn:
+        await _execute(
+            conn,
+            "DELETE FROM document_chunks WHERE document_id = ?",
+            (document_id,),
+        )
         for c in chunks:
-            await conn.execute(
+            chunk_id = c.get("chunk_id") or _new_id()
+            await _execute(
+                conn,
                 """
                 INSERT INTO document_chunks (
-                    id, document_id, content, embedding, chunk_index,
+                    id, document_id, content, chunk_index,
                     section_path, anchor, char_start, char_end, source_type
                 )
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                _new_id(),
-                document_id,
-                c["content"],
-                json.dumps(c["embedding"]),
-                c["chunk_index"],
-                json.dumps(c.get("section_path", [])),
-                c.get("anchor"),
-                c.get("char_start", 0),
-                c.get("char_end", 0),
-                source_type,
+                (
+                    chunk_id,
+                    document_id,
+                    c["content"],
+                    c["chunk_index"],
+                    json.dumps(c.get("section_path", [])),
+                    c.get("anchor"),
+                    c.get("char_start", 0),
+                    c.get("char_end", 0),
+                    source_type,
+                ),
             )
-
-
-# ---------------------------------------------------------------------------
-# Hybrid retrieval helpers (tsvector + pgvector via RRF)
-# ---------------------------------------------------------------------------
-
-
-async def keyword_search(
-    query: str,
-    top_k: int,
-    language: str = "english",
-    allowed_source_types: list[str] | None = None,
-) -> list[dict]:
-    """Top-K chunks matching a full-text query.
-
-    Returns rows with keys: ``id``, ``document_id``, ``content``,
-    ``chunk_index``, ``section_path``, ``anchor``, ``rank``. ``rank`` is the
-    ``ts_rank`` score the RRF merger uses for ordering.
-    """
-    if allowed_source_types is None:
-        allowed_source_types = ["firstspirit"]
-    async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, document_id, content, chunk_index,
-                   section_path, anchor,
-                   ts_rank(search_vector, plainto_tsquery($4, $1)) AS rank
-            FROM document_chunks
-            WHERE search_vector @@ plainto_tsquery($4, $1)
-              AND source_type = ANY($3::text[])
-            ORDER BY rank DESC
-            LIMIT $2
-            """,
-            query,
-            top_k,
-            allowed_source_types,
-            language,
-        )
-    return [_hydrate_chunk(r) for r in rows]
-
-
-async def vector_search_pg(
-    query_embedding: list[float],
-    top_k: int,
-    allowed_source_types: list[str] | None = None,
-) -> list[dict]:
-    """Top-K chunks by pgvector cosine similarity.
-
-    The ``embedding`` column is stored as TEXT (JSON-encoded). The query
-    casts both sides via ``::vector`` so pgvector's ``<=>`` operator can
-    compute cosine distance.
-    """
-    if allowed_source_types is None:
-        allowed_source_types = ["firstspirit"]
-    embedding_json = json.dumps(query_embedding)
-    async with _acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, document_id, content, chunk_index,
-                   section_path, anchor,
-                   embedding::vector <=> $1::vector AS distance
-            FROM document_chunks
-            WHERE source_type = ANY($3::text[])
-            ORDER BY distance
-            LIMIT $2
-            """,
-            embedding_json,
-            top_k,
-            allowed_source_types,
-        )
-    return [_hydrate_chunk(r) for r in rows]
-
-
-def _hydrate_chunk(row: asyncpg.Record) -> dict:
-    d = dict(row)
-    if isinstance(d.get("section_path"), str):
-        d["section_path"] = json.loads(d["section_path"])
-    return d
 
 
 # ---------------------------------------------------------------------------
@@ -454,16 +423,13 @@ async def create_conversation(*, user_id: str, title: str = "New Conversation") 
     conv_id = _new_id()
     now = _now()
     async with _acquire() as conn:
-        await conn.execute(
+        await _execute(
+            conn,
             """
             INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            conv_id,
-            user_id,
-            title,
-            now,
-            now,
+            (conv_id, user_id, title, now, now),
         )
     return {
         "id": conv_id,
@@ -477,17 +443,18 @@ async def create_conversation(*, user_id: str, title: str = "New Conversation") 
 async def get_conversation(conv_id: str, user_id: str) -> dict | None:
     """Return the conversation only if it belongs to the given user."""
     async with _acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM conversations WHERE id = $1 AND user_id = $2",
-            conv_id,
-            user_id,
+        row = await _fetchone(
+            conn,
+            "SELECT * FROM conversations WHERE id = ? AND user_id = ?",
+            (conv_id, user_id),
         )
-    return dict(row) if row else None
+    return row
 
 
 async def list_conversations(user_id: str) -> list[dict]:
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT c.*,
                    (SELECT content
@@ -496,62 +463,58 @@ async def list_conversations(user_id: str) -> list[dict]:
                     ORDER BY created_at DESC
                     LIMIT 1) AS preview
             FROM conversations c
-            WHERE c.user_id = $1
+            WHERE c.user_id = ?
             ORDER BY c.updated_at DESC
             """,
-            user_id,
+            (user_id,),
         )
-    return [dict(r) for r in rows]
+    return rows
 
 
 async def update_conversation_title(conv_id: str, user_id: str, title: str) -> bool:
     async with _acquire() as conn:
-        result = await conn.execute(
-            "UPDATE conversations SET title = $1, updated_at = $2 WHERE id = $3 AND user_id = $4",
-            title,
-            _now(),
-            conv_id,
-            user_id,
+        rowcount = await _execute(
+            conn,
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (title, _now(), conv_id, user_id),
         )
-        return result != "UPDATE 0"
+    return rowcount > 0
 
 
 async def touch_conversation(conv_id: str, user_id: str) -> None:
     async with _acquire() as conn:
-        await conn.execute(
-            "UPDATE conversations SET updated_at = $1 WHERE id = $2 AND user_id = $3",
-            _now(),
-            conv_id,
-            user_id,
+        await _execute(
+            conn,
+            "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+            (_now(), conv_id, user_id),
         )
 
 
 async def delete_conversation(conv_id: str, user_id: str) -> bool:
     async with _acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM conversations WHERE id = $1 AND user_id = $2",
-            conv_id,
-            user_id,
+        rowcount = await _execute(
+            conn,
+            "DELETE FROM conversations WHERE id = ? AND user_id = ?",
+            (conv_id, user_id),
         )
-        return result != "DELETE 0"
+    return rowcount > 0
 
 
 async def search_conversations_by_title(user_id: str, query: str, limit: int = 20) -> list[dict]:
     pattern = f"%{query}%"
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT id, title, created_at, updated_at
             FROM conversations
-            WHERE user_id = $1 AND title ILIKE $2
+            WHERE user_id = ? AND title LIKE ?
             ORDER BY updated_at DESC
-            LIMIT $3
+            LIMIT ?
             """,
-            user_id,
-            pattern,
-            limit,
+            (user_id, pattern, limit),
         )
-    return [dict(r) for r in rows]
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -576,24 +539,27 @@ async def create_message(
     now = _now()
     sources_json = json.dumps(sources) if sources is not None else None
     async with _acquire() as conn:
-        result = await conn.execute(
+        async with conn.execute(
             """
             INSERT INTO messages (id, conversation_id, role, content, sources, created_at)
-            SELECT $1, $2, $3, $4, $5::jsonb, $6
+            SELECT ?, ?, ?, ?, ?, ?
             WHERE EXISTS (
-                SELECT 1 FROM conversations WHERE id = $7 AND user_id = $8
+                SELECT 1 FROM conversations WHERE id = ? AND user_id = ?
             )
             """,
-            msg_id,
-            conversation_id,
-            role,
-            content,
-            sources_json,
-            now,
-            conversation_id,
-            user_id,
-        )
-        if result == "INSERT 0 0":
+            (
+                msg_id,
+                conversation_id,
+                role,
+                content,
+                sources_json,
+                now,
+                conversation_id,
+                user_id,
+            ),
+        ) as cur:
+            inserted = cur.rowcount
+        if inserted == 0:
             return None
     await touch_conversation(conversation_id, user_id)
     return {
@@ -609,24 +575,20 @@ async def create_message(
 async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
     """Return messages only if the conversation belongs to *user_id*."""
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT m.*
             FROM messages m
             JOIN conversations c ON c.id = m.conversation_id
-            WHERE m.conversation_id = $1 AND c.user_id = $2
+            WHERE m.conversation_id = ? AND c.user_id = ?
             ORDER BY m.created_at ASC
             """,
-            conversation_id,
-            user_id,
+            (conversation_id, user_id),
         )
-    results: list[dict] = []
-    for r in rows:
-        d = dict(r)
-        # asyncpg returns JSONB as a raw string when no type codec is registered.
+    for d in rows:
         d["sources"] = json.loads(d["sources"]) if d.get("sources") else None
-        results.append(d)
-    return results
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -645,21 +607,20 @@ async def create_sync_run(
     ``kind`` must be one of: ``"url_list"``, ``"vault"`` (CHECK constraint
     enforces this at the SQL layer).
     """
+    started_at_str = started_at.isoformat() if isinstance(started_at, datetime) else started_at
     async with _acquire() as conn:
-        await conn.execute(
+        await _execute(
+            conn,
             """
             INSERT INTO source_sync_runs (
                 id, kind, status,
                 items_total, items_new, items_updated, items_unchanged, items_error,
                 started_at
             )
-            VALUES ($1, $2, 'running', 0, 0, 0, 0, 0, $3)
+            VALUES (?, ?, 'running', 0, 0, 0, 0, 0, ?)
             """,
-            sync_run_id,
-            kind,
-            started_at,
+            (sync_run_id, kind, started_at_str),
         )
-    started_at_str = started_at.isoformat() if isinstance(started_at, datetime) else started_at
     return {
         "id": sync_run_id,
         "kind": kind,
@@ -685,38 +646,45 @@ async def update_sync_run(
     items_unchanged: int = 0,
     items_error: int = 0,
 ) -> bool:
+    finished_at_str: str | None = (
+        finished_at.isoformat() if isinstance(finished_at, datetime) else finished_at
+    )
     async with _acquire() as conn:
-        result: str = await conn.execute(
+        rowcount = await _execute(
+            conn,
             """
             UPDATE source_sync_runs
-            SET status = $1, finished_at = $2,
-                items_total = $3, items_new = $4, items_updated = $5,
-                items_unchanged = $6, items_error = $7
-            WHERE id = $8
+            SET status = ?, finished_at = ?,
+                items_total = ?, items_new = ?, items_updated = ?,
+                items_unchanged = ?, items_error = ?
+            WHERE id = ?
             """,
-            status,
-            finished_at,
-            items_total,
-            items_new,
-            items_updated,
-            items_unchanged,
-            items_error,
-            sync_run_id,
+            (
+                status,
+                finished_at_str,
+                items_total,
+                items_new,
+                items_updated,
+                items_unchanged,
+                items_error,
+                sync_run_id,
+            ),
         )
-        return result != "UPDATE 0"
+    return rowcount > 0
 
 
 async def list_sync_runs(limit: int = 10) -> list[dict]:
     async with _acquire() as conn:
-        rows = await conn.fetch(
+        rows = await _fetchall(
+            conn,
             """
             SELECT * FROM source_sync_runs
             ORDER BY started_at DESC
-            LIMIT $1
+            LIMIT ?
             """,
-            limit,
+            (limit,),
         )
-    return [dict(r) for r in rows]
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -733,16 +701,13 @@ async def create_sync_item(
     item_id = _new_id()
     now = _now()
     async with _acquire() as conn:
-        await conn.execute(
+        await _execute(
+            conn,
             """
             INSERT INTO source_sync_items (id, sync_run_id, source_ref, outcome, created_at)
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            item_id,
-            sync_run_id,
-            source_ref,
-            outcome,
-            now,
+            (item_id, sync_run_id, source_ref, outcome, now),
         )
     return {
         "id": item_id,
@@ -760,19 +725,19 @@ async def update_sync_item_outcome(
     error_message: str | None = None,
 ) -> bool:
     async with _acquire() as conn:
-        result = await conn.execute(
-            "UPDATE source_sync_items SET outcome = $1, error_message = $2 WHERE id = $3",
-            outcome,
-            error_message,
-            item_id,
+        rowcount = await _execute(
+            conn,
+            "UPDATE source_sync_items SET outcome = ?, error_message = ? WHERE id = ?",
+            (outcome, error_message, item_id),
         )
-        return result != "UPDATE 0"
+    return rowcount > 0
 
 
 async def list_sync_items_for_run(sync_run_id: str) -> list[dict]:
     async with _acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM source_sync_items WHERE sync_run_id = $1 ORDER BY created_at",
-            sync_run_id,
+        rows = await _fetchall(
+            conn,
+            "SELECT * FROM source_sync_items WHERE sync_run_id = ? ORDER BY created_at",
+            (sync_run_id,),
         )
-    return [dict(r) for r in rows]
+    return rows

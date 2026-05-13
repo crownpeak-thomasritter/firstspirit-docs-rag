@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.config import CITATIONS_MAX_COUNT, LLM_TOOLS_ENABLED, LLM_TOOLS_MAX_PER_TURN
 from backend.db import repository
-from backend.llm.openrouter import stream_chat
+from backend.llm.chat import stream_chat
 from backend.rag.citations import CitationMarkerStripper, extract_cited_chunk_ids
 from backend.rag.tools import TOOL_SCHEMAS, execute_tool, serialize_tool_result
 from backend.routes.conversations import DEFAULT_USER_ID

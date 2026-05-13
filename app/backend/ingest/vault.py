@@ -28,7 +28,7 @@ import frontmatter
 
 from backend.config import DEFAULT_SOURCE_TYPE, SOURCE_VAULT_PATH
 from backend.db import repository
-from backend.rag import document_chunker
+from backend.rag import document_chunker, vector_store
 from backend.rag.embeddings import embed_batch
 from backend.services import extractor
 
@@ -161,8 +161,9 @@ async def _ingest_one_file(path: Path, rel_path: str, *, source_type: str) -> st
 
     embeddings = await asyncio.to_thread(embed_batch, [c.content for c in chunks])
 
-    payload = [
+    chunk_payload = [
         {
+            "chunk_id": repository._new_id(),
             "content": c.content,
             "embedding": emb,
             "chunk_index": c.chunk_index,
@@ -183,20 +184,49 @@ async def _ingest_one_file(path: Path, rel_path: str, *, source_type: str) -> st
             content_hash=content_hash,
             metadata=metadata,
         )
-        await repository.replace_chunks_for_document(
-            existing["id"], payload, source_type=source_type
+        document_id = existing["id"]
+        outcome = "updated"
+    else:
+        doc = await repository.create_document(
+            title=str(title),
+            description=description,
+            url=source_url_str,
+            content_path=rel_path,
+            source_type=source_type,
+            lang=str(lang) if lang else None,
+            content_hash=content_hash,
+            metadata=metadata,
         )
-        return "updated"
+        document_id = doc["id"]
+        outcome = "ingested"
 
-    doc = await repository.create_document(
-        title=str(title),
-        description=description,
-        url=source_url_str,
-        content_path=rel_path,
-        source_type=source_type,
-        lang=str(lang) if lang else None,
-        content_hash=content_hash,
-        metadata=metadata,
+    await repository.replace_chunks_for_document(
+        document_id, chunk_payload, source_type=source_type
     )
-    await repository.replace_chunks_for_document(doc["id"], payload, source_type=source_type)
-    return "ingested"
+
+    qdrant_chunks = [
+        {
+            **c,
+            "source_type": source_type,
+            "document_title": str(title),
+            "document_url": source_url_str,
+            "document_content_path": rel_path,
+        }
+        for c in chunk_payload
+    ]
+    try:
+        await vector_store.upsert_chunks(document_id=document_id, chunks=qdrant_chunks)
+    except Exception as exc:
+        logger.error(
+            "Qdrant upsert failed for %s; rolling back SQLite chunks: %s",
+            rel_path,
+            exc,
+        )
+        try:
+            await vector_store.delete_document(document_id)
+        except Exception as cleanup_exc:
+            logger.warning("Qdrant cleanup also failed for %s: %s", rel_path, cleanup_exc)
+        await repository.replace_chunks_for_document(document_id, [], source_type=source_type)
+        raise
+
+    return outcome
