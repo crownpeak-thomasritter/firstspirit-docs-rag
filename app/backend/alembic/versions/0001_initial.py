@@ -1,24 +1,26 @@
-"""Initial schema — FirstSpirit documentation RAG.
+"""Initial schema — FirstSpirit documentation RAG (SQLite).
 
-Fresh baseline for the pivoted project. Creates the target shape directly:
+Fresh baseline for the pivoted project. SQLite-compatible DDL only — no
+Postgres extensions, no pgvector, no tsvector, no auth tables.
 
-* ``documents`` (replaces ``videos``): documentation pages identified by URL or
-  vault content path, with crawler conditional-GET state (etag, last_modified)
-  and an idempotency hash for vault re-ingestion.
-* ``document_chunks`` (replaces ``chunks``): chunks of the document body,
-  carrying the heading breadcrumb (``section_path``) and a deep-link anchor
-  instead of YouTube timestamps. Includes the tsvector ``search_vector``
-  GENERATED column + GIN index needed by hybrid retrieval.
-* ``source_sync_runs`` / ``source_sync_items`` (replace the ``channel_sync_*``
-  pair): generic ingest-run audit. ``source_ref`` is a URL for crawled sources
-  and a vault relative path for markdown sources.
-* Auth tables (``users``, ``user_messages``, ``signup_attempts``) and chat
-  tables (``conversations``, ``messages``) — shape-compatible with the donor
-  so the protected auth / messages modules drop in cleanly when added.
+* ``documents``: documentation pages identified by URL or vault content path,
+  with crawler conditional-GET state (etag, last_modified) and an idempotency
+  hash for vault re-ingestion. ``metadata`` is JSON-encoded TEXT.
+* ``document_chunks``: chunks of the document body, carrying the heading
+  breadcrumb (``section_path``) and a deep-link anchor. Vector storage and
+  hybrid retrieval live in Qdrant (``rag/vector_store.py``); this table only
+  carries the text + structural metadata SQLite-side.
+* ``source_sync_runs`` / ``source_sync_items``: generic ingest-run audit.
+  ``source_ref`` is a URL for crawled sources and a vault relative path for
+  markdown sources.
+* ``conversations`` / ``messages``: chat persistence. ``sources`` is a
+  JSON-encoded TEXT column.
+
+Timestamps are ISO-8601 TEXT (the application formats with ``datetime.isoformat``).
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-05-12
+Create Date: 2026-05-13
 
 """
 
@@ -34,68 +36,6 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    # --- Extensions -------------------------------------------------------
-    op.execute("CREATE EXTENSION IF NOT EXISTS citext")
-    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-    # pgvector is required for vector_search_pg's `embedding::vector` cast.
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-
-    # --- users -----------------------------------------------------------
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            email CITEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            last_login_at TIMESTAMPTZ,
-            daily_message_count INTEGER NOT NULL DEFAULT 0,
-            rate_window_start TIMESTAMPTZ,
-            is_member BOOLEAN NOT NULL DEFAULT FALSE,
-            member_verified_at TIMESTAMPTZ
-        )
-        """
-    )
-    op.execute("CREATE INDEX IF NOT EXISTS users_email_idx ON users (email)")
-
-    # --- user_messages (sliding-window audit for 25 msg/user/24h cap) ---
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS user_messages (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-        """
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS user_messages_user_id_created_at_idx "
-        "ON user_messages (user_id, created_at DESC)"
-    )
-
-    # --- signup_attempts (audit trail for signup rate-limiting) ---
-    op.execute(
-        """
-        CREATE TABLE IF NOT EXISTS signup_attempts (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            ip INET NOT NULL,
-            email_attempted CITEXT,
-            outcome TEXT NOT NULL CHECK (outcome IN (
-                'accepted','ip_limited','global_limited','duplicate','invalid'
-            )),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-        """
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS signup_attempts_ip_created_at_idx "
-        "ON signup_attempts (ip, created_at DESC)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS signup_attempts_created_at_idx "
-        "ON signup_attempts (created_at DESC)"
-    )
-
     # --- documents -------------------------------------------------------
     # `url` is the canonical source URL for crawled docs; `content_path` is
     # the vault-relative path for markdown sources. Either one is present
@@ -115,10 +55,10 @@ def upgrade() -> None:
             etag TEXT,
             last_modified TEXT,
             content_hash TEXT,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            last_crawled_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            metadata TEXT NOT NULL DEFAULT '{}',
+            last_crawled_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         )
         """
     )
@@ -133,28 +73,24 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS documents_source_type_idx ON documents (source_type)")
 
     # --- document_chunks -------------------------------------------------
-    # `embedding` is JSON-encoded text (matches the donor pattern); the
-    # retriever casts it to `vector` at query time. `section_path` is a
-    # JSONB list of headings ["Top", "Sub"] preserving the breadcrumb.
+    # Vectors live in Qdrant; this table holds only text and structural
+    # metadata used for citation rendering, expansion (neighbor chunks),
+    # and the `get_document` LLM tool. `section_path` is a JSON-encoded
+    # TEXT list of headings ["Top", "Sub"] preserving the breadcrumb.
     # `anchor` is the slug of the deepest heading — citations link to
-    # `url#anchor`. `search_vector` is GENERATED so chunk inserts do not
-    # need to maintain it.
+    # `url#anchor`.
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS document_chunks (
             id TEXT PRIMARY KEY,
             document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
             content TEXT NOT NULL,
-            embedding TEXT NOT NULL,
             chunk_index INTEGER NOT NULL,
-            section_path JSONB NOT NULL DEFAULT '[]'::jsonb,
+            section_path TEXT NOT NULL DEFAULT '[]',
             anchor TEXT,
             char_start INTEGER NOT NULL DEFAULT 0,
             char_end INTEGER NOT NULL DEFAULT 0,
-            source_type TEXT NOT NULL DEFAULT 'firstspirit',
-            search_vector tsvector GENERATED ALWAYS AS (
-                to_tsvector('english', content)
-            ) STORED
+            source_type TEXT NOT NULL DEFAULT 'firstspirit'
         )
         """
     )
@@ -166,10 +102,6 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS document_chunks_source_type_idx "
         "ON document_chunks (source_type)"
     )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS document_chunks_search_vector_idx "
-        "ON document_chunks USING GIN(search_vector)"
-    )
 
     # --- conversations ---------------------------------------------------
     op.execute(
@@ -178,8 +110,8 @@ def upgrade() -> None:
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
             title TEXT NOT NULL DEFAULT 'New Conversation',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         )
         """
     )
@@ -193,8 +125,8 @@ def upgrade() -> None:
             conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
             role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
             content TEXT NOT NULL,
-            sources JSONB,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            sources TEXT,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         )
         """
     )
@@ -213,18 +145,17 @@ def upgrade() -> None:
             items_updated INTEGER NOT NULL DEFAULT 0,
             items_unchanged INTEGER NOT NULL DEFAULT 0,
             items_error INTEGER NOT NULL DEFAULT 0,
-            started_at TIMESTAMPTZ NOT NULL,
-            finished_at TIMESTAMPTZ
+            started_at TEXT NOT NULL,
+            finished_at TEXT
         )
         """
     )
 
     # --- source_sync_items -----------------------------------------------
     # One row per URL/path attempted within a run. `source_ref` is the URL
-    # (for url_list) or the vault-relative path (for vault). `outcome`
-    # mirrors `status` from the donor but adds 'unchanged' so the run
-    # summary can distinguish "fetched and re-embedded" from "skipped by
-    # If-None-Match / content_hash match".
+    # (for url_list) or the vault-relative path (for vault). `outcome` adds
+    # 'unchanged' so the run summary can distinguish "fetched and
+    # re-embedded" from "skipped by If-None-Match / content_hash match".
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS source_sync_items (
@@ -235,7 +166,7 @@ def upgrade() -> None:
                 'pending', 'ingested', 'updated', 'unchanged', 'error'
             )),
             error_message TEXT,
-            created_at TIMESTAMPTZ NOT NULL
+            created_at TEXT NOT NULL
         )
         """
     )
@@ -253,7 +184,3 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS conversations")
     op.execute("DROP TABLE IF EXISTS document_chunks")
     op.execute("DROP TABLE IF EXISTS documents")
-    op.execute("DROP TABLE IF EXISTS signup_attempts")
-    op.execute("DROP TABLE IF EXISTS user_messages")
-    op.execute("DROP TABLE IF EXISTS users")
-    # Extensions left in place — see donor migration for rationale.

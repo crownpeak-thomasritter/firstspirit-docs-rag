@@ -6,11 +6,13 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
-    "asyncpg",
+    "aiosqlite>=0.20",
+    "sqlalchemy>=2.0",
     "alembic",
     "httpx",
     "python-dotenv",
     "openai",
+    "qdrant-client[fastembed]>=1.12",
     "docling-core[chunking,chunking-openai]",
     "numpy",
     "bcrypt",
@@ -91,7 +93,15 @@ exclude = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["docling_core.*", "docling.*", "trafilatura.*", "pymupdf4llm.*", "frontmatter.*"]
+module = [
+    "docling_core.*",
+    "docling.*",
+    "trafilatura.*",
+    "pymupdf4llm.*",
+    "frontmatter.*",
+    "qdrant_client.*",
+    "fastembed.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

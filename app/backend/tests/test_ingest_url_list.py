@@ -138,11 +138,32 @@ class _FakeRepo:
         self.replaced_chunks[document_id] = list(payload)
 
 
+class _FakeVectorStore:
+    """In-memory stand-in for ``backend.rag.vector_store`` calls."""
+
+    def __init__(self) -> None:
+        self.upserted: dict[str, list[dict]] = {}
+        self.deleted: list[str] = []
+
+    async def upsert_chunks(self, *, document_id, chunks):
+        self.upserted[document_id] = list(chunks)
+
+    async def delete_document(self, document_id):
+        self.deleted.append(document_id)
+
+
 @pytest.fixture
 def fake_repo(monkeypatch):
     repo = _FakeRepo()
     monkeypatch.setattr(url_list_mod, "repository", repo)
     return repo
+
+
+@pytest.fixture
+def fake_vector_store(monkeypatch):
+    vs = _FakeVectorStore()
+    monkeypatch.setattr(url_list_mod, "vector_store", vs)
+    return vs
 
 
 def _ok_crawl_result(content=b"<html><body>doc</body></html>", etag='"v1"'):
@@ -195,7 +216,9 @@ async def _patch_pipeline(monkeypatch, *, content=b"<html><body>doc</body></html
     monkeypatch.setattr(url_list_mod, "embed_batch", fake_embed_batch)
 
 
-async def test_sync_url_list_ingests_new_document(tmp_path, fake_repo, monkeypatch):
+async def test_sync_url_list_ingests_new_document(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     list_file = tmp_path / "URL List.md"
     list_file.write_text("https://example.com/a\n")
 
@@ -212,9 +235,20 @@ async def test_sync_url_list_ingests_new_document(tmp_path, fake_repo, monkeypat
     assert "https://example.com/a" in fake_repo.documents_by_url
     [doc] = fake_repo.documents_by_id.values()
     assert fake_repo.replaced_chunks[doc["id"]][0]["content"] == "Hello world."
+    # The Qdrant vector store also received the upsert with the same chunk id
+    # the repository was told to insert.
+    sqlite_chunk_id = fake_repo.replaced_chunks[doc["id"]][0]["chunk_id"]
+    qdrant_chunks = fake_vector_store.upserted[doc["id"]]
+    assert len(qdrant_chunks) == 1
+    assert qdrant_chunks[0]["chunk_id"] == sqlite_chunk_id
+    assert qdrant_chunks[0]["document_title"] == "A Doc"
+    assert qdrant_chunks[0]["document_url"] == "https://example.com/a"
+    assert qdrant_chunks[0]["embedding"] == [0.1] * 1536
 
 
-async def test_sync_url_list_records_unchanged_when_304(tmp_path, fake_repo, monkeypatch):
+async def test_sync_url_list_records_unchanged_when_304(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     fake_repo.documents_by_url["https://example.com/a"] = {
         "id": "doc-existing",
         "etag": '"v1"',
@@ -248,7 +282,9 @@ async def test_sync_url_list_records_unchanged_when_304(tmp_path, fake_repo, mon
     assert "doc-existing" not in fake_repo.replaced_chunks
 
 
-async def test_sync_url_list_records_error_for_crawl_failure(tmp_path, fake_repo, monkeypatch):
+async def test_sync_url_list_records_error_for_crawl_failure(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     list_file = tmp_path / "URL List.md"
     list_file.write_text("https://example.com/a\n")
 
@@ -272,7 +308,9 @@ async def test_sync_url_list_records_error_for_crawl_failure(tmp_path, fake_repo
     assert summary["items_new"] == 0
 
 
-async def test_sync_url_list_continues_after_per_url_exception(tmp_path, fake_repo, monkeypatch):
+async def test_sync_url_list_continues_after_per_url_exception(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     list_file = tmp_path / "URL List.md"
     list_file.write_text("https://example.com/a\nhttps://example.com/b\n")
 
@@ -324,7 +362,9 @@ async def test_sync_url_list_missing_list_raises_file_not_found(tmp_path):
         await url_list_mod.sync_url_list(list_path=str(tmp_path / "nope.md"))
 
 
-async def test_sync_url_list_zero_chunks_records_error(tmp_path, fake_repo, monkeypatch):
+async def test_sync_url_list_zero_chunks_records_error(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     list_file = tmp_path / "URL List.md"
     list_file.write_text("https://example.com/a\n")
 

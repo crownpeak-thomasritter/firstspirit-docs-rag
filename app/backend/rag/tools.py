@@ -3,10 +3,10 @@
 All RAG retrieval is exposed as LLM tool calls — no pre-retrieval happens
 before the model runs. The model chooses which strategy fits each question:
 
-  - ``search_documents``           — hybrid (keyword + vector via RRF). Default.
-  - ``keyword_search_documents``   — tsvector FTS only. Best for exact terms.
-  - ``semantic_search_documents``  — pgvector cosine only. Best for paraphrases.
-  - ``get_document``               — full body of one document.
+  - ``search_documents``           — hybrid (keyword + vector via Qdrant RRF). Default.
+  - ``keyword_search_documents``   — BM25 sparse vector index only. Best for exact terms.
+  - ``semantic_search_documents``  — dense vector cosine only. Best for paraphrases.
+  - ``get_document``               — full body of one document (from SQLite).
 
 Executors return a dict of shape
     {"ok": True, "text": <LLM-facing string>, "chunks": <citation-shaped list>}
@@ -24,6 +24,7 @@ from collections import defaultdict
 from typing import Any
 
 from backend.db import repository
+from backend.rag import vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,9 @@ KEYWORD_SEARCH_TOOL: dict[str, Any] = {
     "function": {
         "name": "keyword_search_documents",
         "description": (
-            "Keyword/full-text search (Postgres tsvector). Best when the user "
-            "uses exact terminology, proper nouns, acronyms, or technical "
-            "terms likely to appear verbatim in the docs. Prefer "
+            "Keyword/full-text search (BM25 sparse vector index). Best when "
+            "the user uses exact terminology, proper nouns, acronyms, or "
+            "technical terms likely to appear verbatim in the docs. Prefer "
             "`search_documents` unless you specifically need literal-term "
             "matching."
         ),
@@ -89,10 +90,11 @@ SEMANTIC_SEARCH_TOOL: dict[str, Any] = {
     "function": {
         "name": "semantic_search_documents",
         "description": (
-            "Semantic/vector search (pgvector cosine). Best for conceptual or "
-            "paraphrased questions where the user's wording may not match the "
-            "docs literally. Prefer `search_documents` unless you know "
-            "terminology will diverge and need pure semantic matching."
+            "Semantic/vector search (dense vector cosine similarity). Best "
+            "for conceptual or paraphrased questions where the user's wording "
+            "may not match the docs literally. Prefer `search_documents` "
+            "unless you know terminology will diverge and need pure semantic "
+            "matching."
         ),
         "parameters": {
             "type": "object",
@@ -165,59 +167,6 @@ def _clamp_top_k(value: Any, default: int = 10, maximum: int = 30) -> int:
     except (TypeError, ValueError):
         k = default
     return max(1, min(maximum, k))
-
-
-async def _hydrate_chunks(raw_chunks: list[dict]) -> list[dict]:
-    """Enrich raw repository chunks with document title/url and reshape to
-    the canonical citation-chunk dict.
-
-    Fetches document metadata for all unique document_ids concurrently to
-    avoid serial DB round-trips when a search spans many documents.
-    """
-    if not raw_chunks:
-        return []
-
-    unique_ids = list({c.get("document_id", "") for c in raw_chunks if c.get("document_id")})
-
-    async def _load(doc_id: str) -> tuple[str, dict[str, str | None]]:
-        try:
-            doc = await repository.get_document(doc_id)
-        except Exception as exc:
-            logger.warning("hydrate: get_document failed for %s: %s", doc_id, exc, exc_info=True)
-            doc = None
-        info = doc or {}
-        return doc_id, {
-            "title": info.get("title") or "Unknown Document",
-            "url": info.get("url"),
-            "content_path": info.get("content_path"),
-            "source_type": info.get("source_type") or "firstspirit",
-        }
-
-    document_cache: dict[str, dict[str, str | None]] = dict(
-        await asyncio.gather(*(_load(v) for v in unique_ids))
-    )
-
-    out: list[dict] = []
-    for c in raw_chunks:
-        doc_id = c.get("document_id", "")
-        meta = document_cache.get(doc_id, {})
-        out.append(
-            {
-                "chunk_id": c.get("id", c.get("chunk_id", "")),
-                "content": c.get("content", ""),
-                "document_id": doc_id,
-                "document_title": meta.get("title") or "Unknown Document",
-                "document_url": meta.get("url"),
-                "document_content_path": meta.get("content_path"),
-                "source_type": meta.get("source_type") or "firstspirit",
-                "section_path": c.get("section_path") or [],
-                "anchor": c.get("anchor"),
-                # Preserve chunk_index so the small-to-big expansion in
-                # rag/expansion.py can fetch in-document neighbours.
-                "chunk_index": c.get("chunk_index", 0),
-            }
-        )
-    return out
 
 
 def _format_search_results(chunks: list[dict]) -> str:
@@ -436,8 +385,8 @@ async def execute_search_keyword(
     raw_arguments: str | dict,
     allowed_source_types: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Keyword-only (tsvector FTS) search."""
-    from backend.config import DEFAULT_SOURCE_TYPE, KEYWORD_LANGUAGE, RETRIEVAL_MAX_PER_DOCUMENT
+    """Keyword-only (BM25 sparse vector index) search."""
+    from backend.config import DEFAULT_SOURCE_TYPE, RETRIEVAL_MAX_PER_DOCUMENT
 
     args = _parse_args(raw_arguments)
     if args is None:
@@ -450,13 +399,11 @@ async def execute_search_keyword(
     allowed = allowed_source_types or [DEFAULT_SOURCE_TYPE]
 
     try:
-        raw = await repository.keyword_search(
+        chunks = await vector_store.keyword_search(
             query,
             top_k=top_k,
-            language=KEYWORD_LANGUAGE,
             allowed_source_types=allowed,
         )
-        chunks = await _hydrate_chunks(raw)
     except Exception as exc:
         logger.warning("search_keyword failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"search failed: {exc}"}
@@ -472,7 +419,7 @@ async def execute_search_semantic(
     embedding_cache: dict[str, list[float]] | None = None,
     allowed_source_types: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Semantic-only (pgvector cosine) search."""
+    """Semantic-only (dense vector cosine) search."""
     from backend.config import DEFAULT_SOURCE_TYPE, RETRIEVAL_MAX_PER_DOCUMENT
 
     args = _parse_args(raw_arguments)
@@ -487,10 +434,11 @@ async def execute_search_semantic(
 
     try:
         embedding = await _embed_query(query, embedding_cache)
-        raw = await repository.vector_search_pg(
-            embedding, top_k=top_k, allowed_source_types=allowed
+        chunks = await vector_store.semantic_search(
+            embedding,
+            top_k=top_k,
+            allowed_source_types=allowed,
         )
-        chunks = await _hydrate_chunks(raw)
     except Exception as exc:
         logger.warning("search_semantic failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"search failed: {exc}"}

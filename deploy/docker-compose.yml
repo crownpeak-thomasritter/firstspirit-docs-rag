@@ -1,8 +1,9 @@
 # FirstSpirit Docs RAG — local + single-host docker stack.
 #
-# Brings up Postgres (pgvector) and the single FastAPI+frontend app container.
-# Compose-level vars (POSTGRES_PASSWORD, OPENROUTER_API_KEY, paths) come from
-# `deploy/.env` — copy `deploy/.env.example` and fill it in before `up`.
+# Single FastAPI+frontend container backed by SQLite (chat + metadata) and
+# Qdrant Cloud (vectors, server-side hybrid retrieval). Compose-level vars
+# come from `deploy/.env` — copy `deploy/.env.example` and fill it in before
+# `up`.
 #
 # Run from the repo root:
 #     docker compose -f deploy/docker-compose.yml up -d --build
@@ -10,27 +11,6 @@
 # Then visit http://localhost:8000.
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: firstspirit-docs-rag-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-docs_rag}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in deploy/.env}
-      POSTGRES_DB: ${POSTGRES_DB:-docs_rag}
-    ports:
-      # Loopback-only on the host so a misconfigured firewall can't expose
-      # Postgres to the public internet. Tools on the host (psql, DBeaver)
-      # can still reach it via 127.0.0.1:5433.
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docs_rag} -d ${POSTGRES_DB:-docs_rag}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   app:
     build:
       context: ..
@@ -40,14 +20,31 @@ services:
     restart: unless-stopped
     environment:
       # --- LLM / embeddings ------------------------------------------------
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY must be set in deploy/.env}
+      # Provider selection. Values: "openrouter" | "openai".
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openrouter}
+      # Either OPENROUTER_API_KEY or OPENAI_API_KEY is required depending on
+      # the active providers above. Neither is forced at compose time so
+      # operators can pick the right one without setting a dummy.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4.6}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
       LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-}
 
-      # --- Database --------------------------------------------------------
-      # Resolved from the POSTGRES_* values; the app sees a single connection
-      # string and never needs to know about the host's port mapping.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-docs_rag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-docs_rag}
+      # --- Vector store (Qdrant Cloud) ------------------------------------
+      QDRANT_URL: ${QDRANT_URL:?QDRANT_URL must be set in deploy/.env}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in deploy/.env}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-firstspirit_docs}
+
+      # --- Database (SQLite) -----------------------------------------------
+      # Path uses four slashes: three for the scheme + one for the absolute path.
+      DATABASE_URL: sqlite+aiosqlite:////app/data/app.db
+
+      # --- FastEmbed cache (BM25 model download) --------------------------
+      # Persist the ~30MB ONNX BM25 model so it isn't re-downloaded every restart.
+      FASTEMBED_CACHE_PATH: /app/data/fastembed-cache
 
       # --- RAG tuning (all optional with sensible defaults) ----------------
       RETRIEVAL_EXPANSION_WINDOW: ${RETRIEVAL_EXPANSION_WINDOW:-1}
@@ -81,6 +78,7 @@ services:
     ports:
       - "${APP_HOST_PORT:-8000}:8000"
     volumes:
+      - sqlite_data:/app/data
       # URL list: a single markdown file with one URL per line. The default
       # path resolves to deploy/sources/ inside the repo, which we ship with
       # a placeholder so the mount always exists.
@@ -91,9 +89,6 @@ services:
       # Obsidian directory, and set SOURCE_VAULT_PATH_IN_CONTAINER=/app/vault
       # so the ingester actually reads it.
       - ${VAULT_HOST_PATH:-./sources/empty-vault}:/app/vault:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test:
         - "CMD"
@@ -106,4 +101,4 @@ services:
       retries: 5
 
 volumes:
-  postgres_data:
+  sqlite_data:

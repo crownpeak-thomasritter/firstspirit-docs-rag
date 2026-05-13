@@ -1,11 +1,16 @@
 """
-Embeddings service — wraps the OpenRouter embeddings API via the openai SDK.
+Embeddings service — wraps the configured provider's embeddings API.
+
+The provider (OpenRouter or OpenAI native) is selected by the
+``EMBEDDING_PROVIDER`` env var via ``llm.providers.get_sync_embed_client``.
+The OpenRouter slug ``openai/text-embedding-3-small`` is automatically
+rewritten to the unprefixed form when the provider is OpenAI native.
 
 Exposes:
   embed_text(text: str) -> list[float]
   embed_batch(texts: list[str]) -> list[list[float]]
 
-Uses model: openai/text-embedding-3-small (dimensionality: 1536)
+Default model: openai/text-embedding-3-small (dimensionality: 1536)
 """
 
 from __future__ import annotations
@@ -14,25 +19,14 @@ import logging
 
 from openai import OpenAI
 
-from backend.config import EMBEDDING_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+from backend.config import EMBEDDING_MODEL
+from backend.llm.providers import get_sync_embed_client, resolve_embedding_model
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Client (module-level singleton — re-used across calls)
-# ---------------------------------------------------------------------------
-
-_client: OpenAI | None = None
-
 
 def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(
-            api_key=OPENROUTER_API_KEY,
-            base_url=OPENROUTER_BASE_URL,
-        )
-    return _client
+    return get_sync_embed_client()
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +36,7 @@ def _get_client() -> OpenAI:
 
 def embed_text(text: str) -> list[float]:
     """
-    Embed a single text string via OpenRouter.
+    Embed a single text string via the active embedding provider.
 
     Args:
         text: A non-empty string to embed.
@@ -52,7 +46,7 @@ def embed_text(text: str) -> list[float]:
 
     Raises:
         ValueError: If *text* is empty or whitespace-only.
-        Exception: If the OpenRouter API call fails.
+        Exception: If the API call fails.
     """
     if not text or not text.strip():
         raise ValueError(
@@ -62,11 +56,11 @@ def embed_text(text: str) -> list[float]:
     client = _get_client()
     try:
         response = client.embeddings.create(
-            model=EMBEDDING_MODEL,
+            model=resolve_embedding_model(EMBEDDING_MODEL),
             input=text,
         )
     except Exception as exc:
-        logger.error("OpenRouter embeddings API call failed: %s", exc)
+        logger.error("Embeddings API call failed: %s", exc)
         raise RuntimeError(f"Embeddings API request failed: {exc}") from exc
 
     embedding = response.data[0].embedding
@@ -75,7 +69,7 @@ def embed_text(text: str) -> list[float]:
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
     """
-    Embed a list of text strings via OpenRouter in a single batched API call.
+    Embed a list of text strings via the active embedding provider in a single batched API call.
 
     Args:
         texts: A list of strings. May be empty (returns [] immediately).
@@ -86,7 +80,7 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 
     Raises:
         ValueError: If any text in the list is empty or whitespace-only.
-        Exception: If the OpenRouter API call fails.
+        Exception: If the API call fails.
     """
     if not texts:
         return []
@@ -101,11 +95,11 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
     client = _get_client()
     try:
         response = client.embeddings.create(
-            model=EMBEDDING_MODEL,
+            model=resolve_embedding_model(EMBEDDING_MODEL),
             input=texts,
         )
     except Exception as exc:
-        logger.error("OpenRouter embeddings batch API call failed: %s", exc)
+        logger.error("Embeddings batch API call failed: %s", exc)
         raise RuntimeError(f"Embeddings batch API request failed: {exc}") from exc
 
     # The API guarantees results in the same order as inputs

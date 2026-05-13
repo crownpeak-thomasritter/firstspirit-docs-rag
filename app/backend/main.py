@@ -4,7 +4,8 @@ Lifespan responsibilities:
 
 1. Run Alembic migrations to ``head`` (creates documents / chunks / sync /
    conversation tables on first start; no-ops thereafter).
-2. Initialise the Postgres connection pool used by every repository call.
+2. Initialise the SQLite connection layer used by every repository call.
+3. Ensure the Qdrant collection exists.
 
 The pivot drops the donor's auth stack — no signup, no login, no
 ``Depends(get_current_user)`` wiring. Three routers are mounted:
@@ -28,8 +29,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from backend.config import CORS_ORIGINS, DATABASE_URL, FRONTEND_DIST
-from backend.db.postgres import close_pg_pool, init_pg_pool
+from backend.config import CORS_ORIGINS, DATABASE_URL, FRONTEND_DIST, QDRANT_URL
+from backend.db.sqlite import close_sqlite_db, init_sqlite_db
+from backend.rag import vector_store
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,9 +39,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run Alembic migrations, then initialise the Postgres pool."""
+    """Run Alembic migrations, init SQLite, then ensure the Qdrant collection."""
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set — the app refuses to start without it.")
+    if not QDRANT_URL:
+        raise RuntimeError(
+            "QDRANT_URL is not set — the app refuses to start without a Qdrant endpoint."
+        )
 
     logger.info("Running Alembic migrations…")
     backend_dir = Path(__file__).resolve().parent
@@ -67,12 +73,16 @@ async def lifespan(app: FastAPI):
         )
     logger.info("Alembic migrations applied.")
 
-    await init_pg_pool()
-    logger.info("Postgres pool initialised.")
+    await init_sqlite_db()
+    logger.info("SQLite initialised.")
+
+    await vector_store.ensure_collection()
+    logger.info("Qdrant collection ensured.")
 
     yield
     logger.info("Shutting down.")
-    await close_pg_pool()
+    await close_sqlite_db()
+    await vector_store.close()
 
 
 app = FastAPI(title="FirstSpirit Docs RAG API", lifespan=lifespan)

@@ -33,33 +33,63 @@ _find_and_load_env()
 
 
 # ---------------------------------------------------------------------------
-# LLM / embeddings (OpenRouter)
+# LLM / embeddings (provider-agnostic — OpenRouter or OpenAI native)
 # ---------------------------------------------------------------------------
 
+# Provider selection. Values: "openrouter" | "openai".
+LLM_PROVIDER: str = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
+EMBEDDING_PROVIDER: str = os.environ.get("EMBEDDING_PROVIDER", "openrouter").strip().lower()
+
 OPENROUTER_API_KEY: str = os.environ.get("OPENROUTER_API_KEY", "")
-if not OPENROUTER_API_KEY:
+OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+
+OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL: str = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+_active_chat_key_missing = (LLM_PROVIDER == "openrouter" and not OPENROUTER_API_KEY) or (
+    LLM_PROVIDER == "openai" and not OPENAI_API_KEY
+)
+_active_embed_key_missing = (EMBEDDING_PROVIDER == "openrouter" and not OPENROUTER_API_KEY) or (
+    EMBEDDING_PROVIDER == "openai" and not OPENAI_API_KEY
+)
+if _active_chat_key_missing or _active_embed_key_missing:
     print(
-        "WARNING: OPENROUTER_API_KEY is not set. Embedding and LLM features will not work.",
+        "WARNING: API key for the active provider is not set. "
+        "Embedding and/or LLM features will not work.",
         file=sys.stderr,
     )
 
-OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
+# Default embedding model uses the OpenRouter slug (`openai/text-embedding-3-small`);
+# the providers factory strips the `openai/` prefix when EMBEDDING_PROVIDER=openai.
+EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "openai/text-embedding-3-small")
 CHAT_MODEL: str = os.environ.get("CHAT_MODEL", "anthropic/claude-sonnet-4.6")
 LLM_REASONING_EFFORT: str = os.environ.get("LLM_REASONING_EFFORT", "").strip().lower()
 
 
 # ---------------------------------------------------------------------------
-# Persistence
+# Persistence (SQLite via aiosqlite)
 # ---------------------------------------------------------------------------
 
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
-# Unlike DynaChat we don't raise at import — tests and the chunker modules are
-# usable without a DB. main.py will refuse to start without DATABASE_URL.
+# We don't raise at import — tests and the chunker modules are usable without
+# a DB. main.py refuses to start without DATABASE_URL.
 
 JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM: str = "HS256"
 JWT_EXPIRY_SECONDS: int = 7 * 24 * 60 * 60
+
+
+# ---------------------------------------------------------------------------
+# Vector store (Qdrant Cloud)
+# ---------------------------------------------------------------------------
+
+QDRANT_URL: str = os.environ.get("QDRANT_URL", "")
+QDRANT_API_KEY: str = os.environ.get("QDRANT_API_KEY", "")
+QDRANT_COLLECTION: str = os.environ.get("QDRANT_COLLECTION", "firstspirit_docs")
+QDRANT_DENSE_VECTOR_NAME: str = "dense"
+QDRANT_SPARSE_VECTOR_NAME: str = "bm25"
+QDRANT_BM25_MODEL: str = os.environ.get("QDRANT_BM25_MODEL", "Qdrant/bm25")
+EMBEDDING_DIM: int = 1536
 
 
 # ---------------------------------------------------------------------------

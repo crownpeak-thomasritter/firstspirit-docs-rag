@@ -102,11 +102,30 @@ class _FakeRepo:
         self.replaced_chunks[document_id] = list(payload)
 
 
+class _FakeVectorStore:
+    def __init__(self) -> None:
+        self.upserted: dict[str, list[dict]] = {}
+        self.deleted: list[str] = []
+
+    async def upsert_chunks(self, *, document_id, chunks):
+        self.upserted[document_id] = list(chunks)
+
+    async def delete_document(self, document_id):
+        self.deleted.append(document_id)
+
+
 @pytest.fixture
 def fake_repo(monkeypatch):
     repo = _FakeRepo()
     monkeypatch.setattr(vault_mod, "repository", repo)
     return repo
+
+
+@pytest.fixture
+def fake_vector_store(monkeypatch):
+    vs = _FakeVectorStore()
+    monkeypatch.setattr(vault_mod, "vector_store", vs)
+    return vs
 
 
 def _patch_pipeline(monkeypatch, *, body_text="A vault note body."):
@@ -160,7 +179,9 @@ async def test_sync_vault_missing_dir_raises_file_not_found(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-async def test_sync_vault_ingests_files_recursively(tmp_path, fake_repo, monkeypatch):
+async def test_sync_vault_ingests_files_recursively(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     (tmp_path / "a.md").write_text("# Note A\n\nHello A.\n")
     sub = tmp_path / "topic"
     sub.mkdir()
@@ -177,9 +198,17 @@ async def test_sync_vault_ingests_files_recursively(tmp_path, fake_repo, monkeyp
     # Both files were registered by their relative paths.
     assert "a.md" in fake_repo.documents_by_content_path
     assert "topic/b.md" in fake_repo.documents_by_content_path
+    # Both documents were also upserted into the Qdrant vector store.
+    assert len(fake_vector_store.upserted) == 2
+    # Vector-store chunks carry document_title and document_content_path metadata.
+    for chunks in fake_vector_store.upserted.values():
+        assert chunks[0]["document_title"] == "Detected Title"
+        assert chunks[0]["document_content_path"] in ("a.md", "topic/b.md")
 
 
-async def test_sync_vault_uses_frontmatter_metadata(tmp_path, fake_repo, monkeypatch):
+async def test_sync_vault_uses_frontmatter_metadata(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     (tmp_path / "page.md").write_text(
         "---\n"
         "title: From Frontmatter\n"
@@ -201,7 +230,9 @@ async def test_sync_vault_uses_frontmatter_metadata(tmp_path, fake_repo, monkeyp
     assert doc["url"] == "https://docs.example/page"
 
 
-async def test_sync_vault_unchanged_when_hash_matches(tmp_path, fake_repo, monkeypatch):
+async def test_sync_vault_unchanged_when_hash_matches(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     import hashlib
 
     (tmp_path / "page.md").write_text("# A\n\nBody.\n")
@@ -222,7 +253,9 @@ async def test_sync_vault_unchanged_when_hash_matches(tmp_path, fake_repo, monke
     assert "doc-existing" not in fake_repo.replaced_chunks
 
 
-async def test_sync_vault_empty_body_records_error(tmp_path, fake_repo, monkeypatch):
+async def test_sync_vault_empty_body_records_error(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     # Frontmatter-only file with no body content.
     (tmp_path / "page.md").write_text("---\ntitle: Empty\n---\n   \n")
 
@@ -234,7 +267,9 @@ async def test_sync_vault_empty_body_records_error(tmp_path, fake_repo, monkeypa
     assert summary["items_new"] == 0
 
 
-async def test_sync_vault_zero_chunks_records_error(tmp_path, fake_repo, monkeypatch):
+async def test_sync_vault_zero_chunks_records_error(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     (tmp_path / "page.md").write_text("# A\n\nBody.\n")
 
     def fake_extract_markdown(content_bytes):
@@ -253,7 +288,9 @@ async def test_sync_vault_zero_chunks_records_error(tmp_path, fake_repo, monkeyp
     assert summary["items_error"] == 1
 
 
-async def test_sync_vault_continues_after_per_file_exception(tmp_path, fake_repo, monkeypatch):
+async def test_sync_vault_continues_after_per_file_exception(
+    tmp_path, fake_repo, fake_vector_store, monkeypatch
+):
     (tmp_path / "good.md").write_text("# Good\n\nbody\n")
     (tmp_path / "bad.md").write_text("# Bad\n\nbody\n")
 

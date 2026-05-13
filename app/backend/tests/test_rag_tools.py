@@ -221,30 +221,28 @@ async def test_execute_search_hybrid_retriever_failure_returns_error(monkeypatch
 # ---------------------------------------------------------------------------
 
 
-async def test_execute_search_keyword_hydrates_chunks(monkeypatch):
-    async def fake_keyword_search(query, top_k, language, allowed_source_types):
+async def test_execute_search_keyword_returns_canonical_chunks(monkeypatch):
+    async def fake_keyword_search(query, top_k=10, allowed_source_types=None):
         return [
             {
+                "chunk_id": "k1",
                 "id": "k1",
                 "document_id": "d1",
+                "document_title": "Hydrated Doc",
+                "document_url": "https://docs.example/d1",
+                "document_content_path": None,
+                "source_type": "firstspirit",
                 "content": "match",
                 "section_path": ["A"],
                 "anchor": "a",
                 "chunk_index": 0,
+                "char_start": 0,
+                "char_end": 5,
+                "score": 0.5,
             }
         ]
 
-    async def fake_get_document(doc_id):
-        return {
-            "id": "d1",
-            "title": "Hydrated Doc",
-            "url": "https://docs.example/d1",
-            "content_path": None,
-            "source_type": "firstspirit",
-        }
-
-    monkeypatch.setattr("backend.db.repository.keyword_search", fake_keyword_search)
-    monkeypatch.setattr("backend.db.repository.get_document", fake_get_document)
+    monkeypatch.setattr("backend.rag.vector_store.keyword_search", fake_keyword_search)
     monkeypatch.setattr("backend.config.RETRIEVAL_EXPANSION_WINDOW", 0, raising=False)
 
     result = await tools.execute_search_keyword({"query": "match"})
@@ -252,6 +250,41 @@ async def test_execute_search_keyword_hydrates_chunks(monkeypatch):
     assert result["ok"] is True
     assert result["chunks"][0]["document_title"] == "Hydrated Doc"
     assert result["chunks"][0]["document_url"] == "https://docs.example/d1"
+
+
+async def test_execute_search_semantic_returns_canonical_chunks(monkeypatch):
+    async def fake_embed(query, cache):
+        return [0.0] * 1536
+
+    async def fake_semantic_search(embedding, top_k=10, allowed_source_types=None):
+        return [
+            {
+                "chunk_id": "s1",
+                "id": "s1",
+                "document_id": "d2",
+                "document_title": "Semantic Doc",
+                "document_url": None,
+                "document_content_path": "notes/x.md",
+                "source_type": "firstspirit",
+                "content": "paraphrase",
+                "section_path": [],
+                "anchor": None,
+                "chunk_index": 1,
+                "char_start": 0,
+                "char_end": 10,
+                "score": 0.9,
+            }
+        ]
+
+    monkeypatch.setattr(tools, "_embed_query", fake_embed)
+    monkeypatch.setattr("backend.rag.vector_store.semantic_search", fake_semantic_search)
+    monkeypatch.setattr("backend.config.RETRIEVAL_EXPANSION_WINDOW", 0, raising=False)
+
+    result = await tools.execute_search_semantic({"query": "match"})
+
+    assert result["ok"] is True
+    assert result["chunks"][0]["document_title"] == "Semantic Doc"
+    assert result["chunks"][0]["document_content_path"] == "notes/x.md"
 
 
 # ---------------------------------------------------------------------------
