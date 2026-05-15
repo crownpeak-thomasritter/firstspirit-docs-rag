@@ -19,7 +19,7 @@ services:
     # Local Qdrant for dev/testing. Production should override QDRANT_URL +
     # QDRANT_API_KEY in deploy/.env to point at Qdrant Cloud; this service can
     # then be left running idle or skipped via `--scale qdrant=0`.
-    image: qdrant/qdrant:v1.13.0
+    image: qdrant/qdrant:v1.18.0
     container_name: firstspirit-docs-rag-qdrant
     restart: unless-stopped
     ports:

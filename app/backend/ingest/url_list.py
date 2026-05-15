@@ -97,15 +97,15 @@ async def sync_url_list(
 
     for url in urls:
         item = await repository.create_sync_item(sync_run_id=sync_run_id, source_ref=url)
+        error_message: str | None = None
         try:
-            outcome = await _ingest_one_url(url, source_type=source_type)
+            outcome, error_message = await _ingest_one_url(url, source_type=source_type)
         except Exception as exc:  # never let one URL kill the run
             logger.exception("URL %s failed unhandled: %s", url, exc)
-            await repository.update_sync_item_outcome(item["id"], "error", str(exc))
-            errors += 1
-            continue
+            outcome = "error"
+            error_message = str(exc)
 
-        await repository.update_sync_item_outcome(item["id"], outcome)
+        await repository.update_sync_item_outcome(item["id"], outcome, error_message)
         if outcome == "ingested":
             new += 1
         elif outcome == "updated":
@@ -141,8 +141,12 @@ async def sync_url_list(
     }
 
 
-async def _ingest_one_url(url: str, *, source_type: str) -> str:
-    """Crawl + extract + chunk + embed one URL. Returns the sync-item outcome."""
+async def _ingest_one_url(url: str, *, source_type: str) -> tuple[str, str | None]:
+    """Crawl + extract + chunk + embed one URL.
+
+    Returns a ``(outcome, error_message)`` tuple. ``error_message`` is None for
+    successful outcomes and carries a short human-readable reason for ``error``.
+    """
     existing = await repository.get_document_by_url(url)
     etag = existing.get("etag") if existing else None
     last_modified = existing.get("last_modified") if existing else None
@@ -151,7 +155,7 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
 
     if result.status is crawler.CrawlStatus.SKIPPED_ROBOTS:
         logger.info("Skipped by robots: %s", url)
-        return "error"
+        return "error", "skipped by robots.txt"
 
     if result.status is crawler.CrawlStatus.NOT_MODIFIED:
         if existing:
@@ -160,15 +164,15 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
                 etag=result.etag,
                 last_modified=result.last_modified,
             )
-        return "unchanged"
+        return "unchanged", None
 
     if result.status is crawler.CrawlStatus.ERROR:
         logger.warning("Fetch error for %s: %s", url, result.error)
-        return "error"
+        return "error", f"fetch failed: {result.error or 'unknown error'}"
 
     # status == OK — we have fresh bytes
     if result.content is None:
-        return "error"
+        return "error", "crawler returned OK with empty body"
 
     extracted = extractor.extract(
         result.content,
@@ -177,7 +181,7 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
     )
     if extracted is None:
         logger.info("Extractor yielded no body for %s", url)
-        return "error"
+        return "error", "extractor yielded no body (possibly JS-rendered or empty page)"
 
     content_hash = hashlib.sha256(result.content).hexdigest()
 
@@ -192,12 +196,12 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
             last_modified=result.last_modified,
             content_hash=content_hash,
         )
-        return "unchanged"
+        return "unchanged", None
 
     chunks, _had_chunk_errors = document_chunker.chunk_document(extracted)
     if not chunks:
         logger.info("Chunker produced 0 chunks for %s", url)
-        return "error"
+        return "error", "chunker produced 0 chunks"
 
     embeddings = await asyncio.to_thread(embed_batch, [c.content for c in chunks])
 
@@ -231,6 +235,7 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
         )
         document_id = existing["id"]
         outcome = "updated"
+        newly_created = False
     else:
         doc = await repository.create_document(
             title=title,
@@ -244,6 +249,7 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
         )
         document_id = doc["id"]
         outcome = "ingested"
+        newly_created = True
 
     await repository.replace_chunks_for_document(
         document_id, chunk_payload, source_type=source_type
@@ -264,14 +270,25 @@ async def _ingest_one_url(url: str, *, source_type: str) -> str:
     try:
         await vector_store.upsert_chunks(document_id=document_id, chunks=qdrant_chunks)
     except Exception as exc:
-        # Roll back the SQLite chunks so the two stores don't diverge. Best-effort
-        # Qdrant cleanup in case some points were upserted before the failure.
-        logger.error("Qdrant upsert failed for %s; rolling back SQLite chunks: %s", url, exc)
+        # Roll back so SQLite + Qdrant + future retries stay consistent.
+        #   1. Best-effort delete of any Qdrant points the partial upsert created.
+        #   2. SQLite: if this was a fresh document, drop the row (CASCADE wipes
+        #      chunks); otherwise just clear the chunks but keep the doc row.
+        #      Either way, also clear ETag / Last-Modified / content_hash on the
+        #      surviving row so a conditional GET on the next sync re-fetches
+        #      instead of 304'ing on the stale identifiers we never committed.
+        logger.error("Qdrant upsert failed for %s; rolling back: %s", url, exc)
         try:
             await vector_store.delete_document(document_id)
         except Exception as cleanup_exc:
             logger.warning("Qdrant cleanup also failed for %s: %s", url, cleanup_exc)
-        await repository.replace_chunks_for_document(document_id, [], source_type=source_type)
+        if newly_created:
+            await repository.delete_document_cascade(document_id)
+        else:
+            await repository.replace_chunks_for_document(
+                document_id, [], source_type=source_type
+            )
+            await repository.clear_document_crawl_state(document_id)
         raise
 
-    return outcome
+    return outcome, None

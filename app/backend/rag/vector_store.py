@@ -158,11 +158,28 @@ async def upsert_chunks(
                 },
             )
         )
-    try:
-        await client.upsert(collection_name=QDRANT_COLLECTION, points=points, wait=True)
-    except Exception as exc:
-        logger.error("Qdrant upsert failed for document_id=%s: %s", document_id, exc)
-        raise RuntimeError(f"Qdrant upsert failed: {exc}") from exc
+    # Batch the upsert. Qdrant's default REST body limit is 32 MB and a single
+    # 1536-dim dense vector + sparse vector + chunk text easily exceeds 15 KB,
+    # so a big PDF (~2k chunks) overruns the cap when sent in one request.
+    batch_size = 200
+    for start in range(0, len(points), batch_size):
+        batch = points[start : start + batch_size]
+        try:
+            await client.upsert(collection_name=QDRANT_COLLECTION, points=batch, wait=True)
+        except Exception as exc:
+            # qdrant-client wraps the HTTP body in repr(exc), but the
+            # exception's __str__ is sometimes empty — fall back to repr so
+            # the sync_run error_message is never blank.
+            detail = str(exc) or repr(exc)
+            logger.error(
+                "Qdrant upsert failed for document_id=%s (batch %d-%d of %d): %s",
+                document_id,
+                start,
+                start + len(batch),
+                len(points),
+                detail,
+            )
+            raise RuntimeError(f"Qdrant upsert failed: {detail}") from exc
 
 
 async def delete_document(document_id: str) -> None:

@@ -285,6 +285,28 @@ async def delete_document_cascade(document_id: str) -> bool:
     return rowcount > 0
 
 
+async def clear_document_crawl_state(document_id: str) -> bool:
+    """Null out etag / last_modified / content_hash on a document row.
+
+    Used by the ingester's rollback path when a Qdrant upsert fails for an
+    already-existing document. Clearing these forces the next sync to re-fetch
+    (instead of 304'ing) and re-process (instead of short-circuiting on
+    content_hash equality) so the document gets a fresh attempt.
+    """
+    async with _acquire() as conn:
+        rowcount = await _execute(
+            conn,
+            """
+            UPDATE documents
+            SET etag = NULL, last_modified = NULL, content_hash = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (_now(), document_id),
+        )
+    return rowcount > 0
+
+
 async def count_documents() -> int:
     async with _acquire() as conn:
         row = await _fetchone(conn, "SELECT COUNT(*) AS n FROM documents")

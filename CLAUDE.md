@@ -346,7 +346,7 @@ The pivot ships as a Docker Compose stack (`deploy/docker-compose.yml`):
 | Service | Image | Port | Purpose |
 |---|---|---|---|
 | `firstspirit-docs-rag-app` | Local `deploy/Dockerfile` build | `localhost:8000` | FastAPI + built frontend in one container; SQLite at `/app/data/app.db` on a named volume |
-| `firstspirit-docs-rag-qdrant` | `qdrant/qdrant:v1.13.0` | `127.0.0.1:6333` (HTTP) / `127.0.0.1:6334` (gRPC) | Local Qdrant for dev/testing; storage on a named `qdrant_data` volume |
+| `firstspirit-docs-rag-qdrant` | `qdrant/qdrant:v1.18.0` | `127.0.0.1:6333` (HTTP) / `127.0.0.1:6334` (gRPC) | Local Qdrant for dev/testing; storage on a named `qdrant_data` volume |
 
 In production, override `QDRANT_URL` + `QDRANT_API_KEY` in `deploy/.env` to point at Qdrant Cloud. The bundled `qdrant` service can then be left running idle, or skipped at startup with `docker compose ... up -d --scale qdrant=0`. The app reaches the local container via the compose-network DNS name `qdrant`; from the host (manual dev) it's `localhost:6333`.
 
