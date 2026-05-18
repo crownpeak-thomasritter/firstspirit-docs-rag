@@ -26,7 +26,7 @@ function formatRelativeTime(dateStr: string): string {
 // ── Skeleton row ─────────────────────────────────────────────────
 function SkeletonRow() {
   return (
-    <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+    <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
       <div className="skeleton" style={{ height: 14, width: '70%', marginBottom: 8 }} />
       <div className="skeleton" style={{ height: 11, width: '40%', marginBottom: 6 }} />
       <div className="skeleton" style={{ height: 11, width: '90%' }} />
@@ -45,7 +45,7 @@ function highlightMatch(title: string, query: string) {
       {title.slice(0, idx)}
       <mark
         style={{
-          background: 'rgba(59,130,246,0.35)',
+          background: 'var(--accent-bg-2)',
           color: 'inherit',
           padding: 0,
           borderRadius: 2,
@@ -120,9 +120,9 @@ function ConvItem({
         position: 'relative',
         padding: '10px 16px',
         cursor: 'pointer',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-        background: isActive ? '#1e293b' : hovered ? 'rgba(30,41,59,0.6)' : 'transparent',
-        borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent',
+        borderBottom: '1px solid var(--border)',
+        background: isActive ? 'var(--surface-1)' : hovered ? 'rgba(26,22,22,0.05)' : 'transparent',
+        borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
         paddingLeft: 13,
         transition: 'background 0.15s, border-color 0.15s',
         userSelect: 'none',
@@ -140,9 +140,9 @@ function ConvItem({
           style={{
             fontSize: 14,
             fontWeight: 500,
-            color: '#f1f5f9',
-            background: '#0f172a',
-            border: '1px solid #3b82f6',
+            color: 'var(--text-primary)',
+            background: 'var(--bg)',
+            border: '1px solid var(--accent)',
             borderRadius: 4,
             padding: '1px 6px',
             width: '100%',
@@ -159,7 +159,7 @@ function ConvItem({
           style={{
             fontSize: 14,
             fontWeight: 500,
-            color: '#f1f5f9',
+            color: 'var(--text-primary)',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -174,7 +174,7 @@ function ConvItem({
       <div
         style={{
           fontSize: 12,
-          color: '#94a3b8',
+          color: 'var(--text-secondary)',
           marginTop: 2,
           marginBottom: preview ? 3 : 0,
         }}
@@ -187,7 +187,7 @@ function ConvItem({
         <div
           style={{
             fontSize: 12,
-            color: '#475569',
+            color: 'var(--text-tertiary)',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -216,7 +216,7 @@ function ConvItem({
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#475569',
+            color: 'var(--text-tertiary)',
             padding: 4,
             borderRadius: 4,
             display: 'flex',
@@ -224,8 +224,8 @@ function ConvItem({
             justifyContent: 'center',
             transition: 'color 0.15s',
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = '#3b82f6')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = '#475569')}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-tertiary)')}
         >
           ✏️
         </button>
@@ -248,7 +248,7 @@ function ConvItem({
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#475569',
+            color: 'var(--text-tertiary)',
             padding: 4,
             borderRadius: 4,
             display: 'flex',
@@ -256,8 +256,8 @@ function ConvItem({
             justifyContent: 'center',
             transition: 'color 0.15s',
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = '#ef4444')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = '#475569')}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--danger)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-tertiary)')}
         >
           <svg
             width="14"
@@ -292,7 +292,7 @@ function ConfirmDialog({ onConfirm, onCancel, deleting, error }: ConfirmDialogPr
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.6)',
+        background: 'rgba(26,22,22,0.45)',
         zIndex: 50,
         display: 'flex',
         alignItems: 'center',
@@ -301,21 +301,23 @@ function ConfirmDialog({ onConfirm, onCancel, deleting, error }: ConfirmDialogPr
     >
       <div
         style={{
-          background: '#1e293b',
-          border: '1px solid rgba(255,255,255,0.1)',
+          background: 'var(--surface-1)',
+          border: '1px solid var(--border)',
           borderRadius: 12,
           padding: 24,
           width: 320,
           maxWidth: 'calc(100vw - 48px)',
-          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+          boxShadow: '0 25px 50px -12px rgba(26,22,22,0.18)',
         }}
       >
-        <p style={{ margin: '0 0 8px', fontWeight: 600, color: '#f1f5f9' }}>Delete conversation?</p>
-        <p style={{ margin: '0 0 20px', fontSize: 14, color: '#94a3b8' }}>
+        <p style={{ margin: '0 0 8px', fontWeight: 600, color: 'var(--text-primary)' }}>
+          Delete conversation?
+        </p>
+        <p style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--text-secondary)' }}>
           This action cannot be undone.
         </p>
         {error && (
-          <p style={{ margin: '0 0 16px', fontSize: 13, color: '#ef4444' }}>
+          <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--danger)' }}>
             Failed to delete. Please try again.
           </p>
         )}
@@ -325,9 +327,9 @@ function ConfirmDialog({ onConfirm, onCancel, deleting, error }: ConfirmDialogPr
             className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             style={{
               background: 'transparent',
-              border: '1px solid rgba(255,255,255,0.15)',
+              border: '1px solid var(--border)',
               borderRadius: 8,
-              color: '#94a3b8',
+              color: 'var(--text-secondary)',
               cursor: 'pointer',
               padding: '8px 16px',
               fontSize: 14,
@@ -340,7 +342,7 @@ function ConfirmDialog({ onConfirm, onCancel, deleting, error }: ConfirmDialogPr
             disabled={deleting}
             className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             style={{
-              background: '#ef4444',
+              background: 'var(--danger)',
               border: 'none',
               borderRadius: 8,
               color: '#fff',
@@ -379,9 +381,9 @@ function DailyQuotaCounter({ used, remaining, resetsAt }: DailyQuotaCounterProps
       data-testid="quota-counter"
       style={{
         padding: '8px 12px',
-        borderTop: '1px solid rgba(255,255,255,0.06)',
+        borderTop: '1px solid var(--border)',
         fontSize: 12,
-        color: atLimit ? '#ef4444' : '#94a3b8',
+        color: atLimit ? 'var(--danger)' : 'var(--text-secondary)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -389,7 +391,9 @@ function DailyQuotaCounter({ used, remaining, resetsAt }: DailyQuotaCounterProps
       }}
     >
       <span>
-        <strong style={{ color: atLimit ? '#ef4444' : '#f1f5f9', fontWeight: 600 }}>
+        <strong
+          style={{ color: atLimit ? 'var(--danger)' : 'var(--text-primary)', fontWeight: 600 }}
+        >
           {used}/{cap}
         </strong>{' '}
         messages today
@@ -533,7 +537,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
             className="active:brightness-90 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none focus-visible:shadow-[0_0_12px_var(--accent-glow)]"
             style={{
               width: '100%',
-              background: '#3b82f6',
+              background: 'var(--accent)',
               color: '#fff',
               border: 'none',
               borderRadius: 8,
@@ -548,10 +552,12 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               gap: 8,
               transition: 'background 0.15s, filter 0.15s',
             }}
-            onMouseEnter={(e) => !creatingNew && (e.currentTarget.style.background = '#1d4ed8')}
+            onMouseEnter={(e) =>
+              !creatingNew && (e.currentTarget.style.background = 'var(--accent-dark)')
+            }
             onMouseLeave={(e) => {
               if (!creatingNew) {
-                e.currentTarget.style.background = '#3b82f6';
+                e.currentTarget.style.background = 'var(--accent)';
               }
             }}
           >
@@ -571,7 +577,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           </button>
 
           {newChatError && (
-            <p style={{ fontSize: 12, color: '#ef4444', margin: '8px 0 0', textAlign: 'center' }}>
+            <p
+              style={{
+                fontSize: 12,
+                color: 'var(--danger)',
+                margin: '8px 0 0',
+                textAlign: 'center',
+              }}
+            >
               {newChatError}
             </p>
           )}
@@ -589,15 +602,15 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               width: '100%',
               padding: '8px 12px',
               borderRadius: 8,
-              background: '#1e293b',
-              border: '1px solid #334155',
-              color: '#f1f5f9',
+              background: 'var(--surface-1)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text-primary)',
               fontSize: 13,
               outline: 'none',
               transition: 'border-color 0.15s',
             }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
-            onBlur={(e) => (e.currentTarget.style.borderColor = '#334155')}
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-strong)')}
           />
         </div>
 
@@ -616,7 +629,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               style={{
                 padding: '40px 16px',
                 textAlign: 'center',
-                color: '#475569',
+                color: 'var(--text-tertiary)',
               }}
             >
               <svg
@@ -632,7 +645,8 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               </svg>
               {debouncedQuery.trim() ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
-                  No matches for <strong style={{ color: '#94a3b8' }}>"{debouncedQuery}"</strong>
+                  No matches for{' '}
+                  <strong style={{ color: 'var(--text-secondary)' }}>"{debouncedQuery}"</strong>
                 </p>
               ) : (
                 <>
@@ -643,17 +657,15 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
                     style={{
                       marginTop: 10,
                       background: 'transparent',
-                      border: '1px solid rgba(59,130,246,0.4)',
+                      border: '1px solid var(--accent)',
                       borderRadius: 8,
-                      color: '#3b82f6',
+                      color: 'var(--accent)',
                       cursor: 'pointer',
                       fontSize: 13,
                       padding: '7px 16px',
                       transition: 'background 0.15s, filter 0.15s',
                     }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.background = 'rgba(59,130,246,0.1)')
-                    }
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-bg)')}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.background = 'transparent';
                     }}
@@ -692,7 +704,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
           <div
             style={{
               padding: '8px 12px',
-              borderTop: '1px solid rgba(255,255,255,0.06)',
+              borderTop: '1px solid var(--border)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -703,7 +715,7 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               title={user.email}
               style={{
                 fontSize: 12,
-                color: '#94a3b8',
+                color: 'var(--text-secondary)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -721,9 +733,9 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
               style={{
                 background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.08)',
+                border: '1px solid var(--border)',
                 borderRadius: 7,
-                color: '#94a3b8',
+                color: 'var(--text-secondary)',
                 cursor: loggingOut ? 'not-allowed' : 'pointer',
                 padding: '5px 10px',
                 fontSize: 12,
@@ -733,14 +745,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               }}
               onMouseEnter={(e) => {
                 if (loggingOut) return;
-                e.currentTarget.style.background = '#1e293b';
-                e.currentTarget.style.color = '#f1f5f9';
-                e.currentTarget.style.borderColor = 'rgba(239,68,68,0.4)';
+                e.currentTarget.style.background = 'var(--surface-1)';
+                e.currentTarget.style.color = 'var(--text-primary)';
+                e.currentTarget.style.borderColor = 'var(--danger)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#94a3b8';
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                e.currentTarget.style.color = 'var(--text-secondary)';
+                e.currentTarget.style.borderColor = 'var(--border)';
               }}
             >
               {loggingOut ? 'Signing out…' : 'Log out'}
@@ -752,14 +764,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
         <div
           style={{
             padding: '10px 12px',
-            borderTop: '1px solid rgba(255,255,255,0.06)',
+            borderTop: '1px solid var(--border)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 8,
           }}
         >
-          <span style={{ fontSize: 12, color: '#475569' }}>DynaChat</span>
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>FirstSpirit Docs</span>
 
           {/* Library admin link — admin-only. is_admin is a server-computed
               hint only; the /api/admin/* endpoints re-verify on every call. */}
@@ -770,22 +782,22 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
               style={{
                 fontSize: 12,
-                color: '#94a3b8',
-                border: '1px solid rgba(255,255,255,0.08)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
                 borderRadius: 7,
                 padding: '5px 7px',
                 textDecoration: 'none',
                 transition: 'background 0.15s, color 0.15s, border-color 0.15s',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#1e293b';
-                e.currentTarget.style.color = '#f1f5f9';
-                e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+                e.currentTarget.style.background = 'var(--surface-1)';
+                e.currentTarget.style.color = 'var(--text-primary)';
+                e.currentTarget.style.borderColor = 'var(--accent)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#94a3b8';
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                e.currentTarget.style.color = 'var(--text-secondary)';
+                e.currentTarget.style.borderColor = 'var(--border)';
               }}
             >
               Admin
@@ -800,9 +812,9 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
             className="focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             style={{
               background: 'transparent',
-              border: '1px solid rgba(255,255,255,0.08)',
+              border: '1px solid var(--border)',
               borderRadius: 7,
-              color: '#94a3b8',
+              color: 'var(--text-secondary)',
               cursor: 'pointer',
               padding: '5px 7px',
               display: 'flex',
@@ -813,14 +825,14 @@ export function Sidebar({ activeConversationId, isOpen, onClose, conversationsRe
               transition: 'background 0.15s, color 0.15s, border-color 0.15s',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.color = '#f1f5f9';
-              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.4)';
+              e.currentTarget.style.background = 'var(--surface-1)';
+              e.currentTarget.style.color = 'var(--text-primary)';
+              e.currentTarget.style.borderColor = 'var(--accent)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = '#94a3b8';
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
+              e.currentTarget.style.borderColor = 'var(--border)';
             }}
           >
             {/* Play/video icon */}

@@ -1,10 +1,14 @@
 export function BrandingHeader() {
   return (
-    <div className="flex flex-col items-center mb-4">
-      <img src="/logo.svg" alt="DynaChat logo" className="w-10 h-10 mb-2" />
-      <span className="text-xl font-semibold text-[var(--text-primary)]">DynaChat</span>
-      <span className="text-sm text-[var(--text-secondary)]">
-        Ask Cole Medin&apos;s YouTube videos and Dynamous lessons anything
+    <div className="flex flex-col items-center mb-2">
+      <div className="flex items-baseline gap-2">
+        <span className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">
+          FirstSpirit
+        </span>
+        <span className="brand-serif text-2xl text-[var(--accent)]">Docs</span>
+      </div>
+      <span className="mt-1 text-sm text-[var(--text-secondary)]">
+        Ask the FirstSpirit &amp; Crownpeak documentation anything
       </span>
     </div>
   );

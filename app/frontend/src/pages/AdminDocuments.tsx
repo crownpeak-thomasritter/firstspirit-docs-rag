@@ -27,7 +27,7 @@ export function AdminDocuments() {
     try {
       const [docsResp, runsResp] = await Promise.all([getSourceDocuments(), getSyncRuns()]);
       setDocuments(docsResp.documents);
-      setRuns(runsResp.runs);
+      setRuns(runsResp.sync_runs);
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to load library', 'error');
     } finally {
@@ -45,6 +45,31 @@ export function AdminDocuments() {
     const t = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(t);
   }, [searchQuery]);
+
+  // While a sync is running, poll the sync-runs table so the user sees
+  // progress (item counts, status) without having to refresh manually.
+  useEffect(() => {
+    if (!syncing) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const [runsResp, docsResp] = await Promise.all([
+          getSyncRuns(),
+          getSourceDocuments(),
+        ]);
+        if (cancelled) return;
+        setRuns(runsResp.sync_runs);
+        setDocuments(docsResp.documents);
+      } catch {
+        // Swallow polling errors — the next tick will retry.
+      }
+    };
+    const id = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [syncing]);
 
   if (status === 'loading') {
     return (

@@ -52,11 +52,11 @@ function citationChip(
       style={{
         display: 'inline-block',
         padding: '3px 10px',
-        border: dimmed ? '1px solid rgba(148,163,184,0.4)' : '1px solid #3b82f6',
+        border: dimmed ? '1px solid var(--border-strong)' : '1px solid var(--accent)',
         borderRadius: 20,
         fontSize: 12,
-        color: dimmed ? '#94a3b8' : '#f1f5f9',
-        background: dimmed ? 'rgba(148,163,184,0.06)' : 'rgba(59,130,246,0.1)',
+        color: dimmed ? 'var(--text-secondary)' : 'var(--text-primary)',
+        background: dimmed ? 'rgba(26,22,22,0.03)' : 'var(--accent-bg)',
         maxWidth: 280,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -86,10 +86,10 @@ function SourceCitations({
   const showTwoTier = cited.length > 0;
 
   return (
-    <div style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8 }}>
+    <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
       {showTwoTier && (
         <>
-          <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>
             Sources cited ({cited.length})
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
@@ -107,7 +107,7 @@ function SourceCitations({
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#94a3b8',
+            color: 'var(--text-secondary)',
             fontSize: 12,
             display: 'flex',
             alignItems: 'center',
@@ -115,8 +115,8 @@ function SourceCitations({
             padding: 0,
             transition: 'color 0.15s',
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = '#f1f5f9')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
           aria-expanded={expanded}
           aria-label={expanded ? 'Collapse sources' : 'Expand sources'}
         >
@@ -178,18 +178,18 @@ export function Message({
       <div
         style={{
           maxWidth: isUser ? '70%' : '80%',
-          background: isUser ? '#2563eb' : '#1e293b',
-          color: '#f1f5f9',
+          background: isUser ? 'var(--accent)' : 'var(--surface-1)',
+          color: isUser ? '#ffffff' : 'var(--text-primary)',
           borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
           padding: '12px 16px',
           lineHeight: 1.7,
           wordBreak: 'break-word',
-          borderLeft: isUser ? '2px solid var(--text-tertiary)' : '2px solid var(--accent)',
+          border: isUser ? '1px solid var(--accent-dark)' : '1px solid var(--border)',
         }}
       >
         {isStreaming && !content ? (
           streamingStatus ? (
-            <div className="text-slate-400 text-[13px] italic">
+            <div className="text-[var(--text-secondary)] text-[13px] italic">
               {streamingStatus.subject ? `Searching: ${streamingStatus.subject}…` : 'Working…'}
             </div>
           ) : (

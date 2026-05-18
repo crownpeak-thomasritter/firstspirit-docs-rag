@@ -50,7 +50,7 @@ describe('ChatInput', () => {
       render(<ChatInput onSend={vi.fn()} isStreaming={false} />);
       expect(screen.getByRole('textbox')).toHaveAttribute(
         'placeholder',
-        'Ask anything about the video library…',
+        'Ask the FirstSpirit documentation…',
       );
     });
 

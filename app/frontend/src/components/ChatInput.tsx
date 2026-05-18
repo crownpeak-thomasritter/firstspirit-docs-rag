@@ -73,8 +73,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     return (
       <div
         style={{
-          background: '#111827',
-          border: '1px solid rgba(255,255,255,0.1)',
+          background: 'var(--surface-1)',
+          border: '1px solid var(--border)',
           borderRadius: 12,
           display: 'flex',
           alignItems: 'center',
@@ -88,9 +88,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
         {/* ── Textarea ── */}
         <textarea
           ref={textareaRef}
-          placeholder={
-            isStreaming ? 'Waiting for response…' : 'Ask anything about the video library…'
-          }
+          placeholder={isStreaming ? 'Waiting for response…' : 'Ask the FirstSpirit documentation…'}
           disabled={isDisabled}
           onInput={adjustHeight}
           onKeyDown={handleKeyDown}
@@ -101,7 +99,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             flex: 1,
             background: 'transparent',
             border: 'none',
-            color: isDisabled ? '#475569' : '#f1f5f9',
+            color: isDisabled ? 'var(--text-tertiary)' : 'var(--text-primary)',
             fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
             fontSize: 15,
             lineHeight: '24px',
@@ -122,7 +120,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             aria-label="Stop response"
             className="active:brightness-90 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             style={{
-              background: '#dc2626',
+              background: 'var(--danger)',
               border: 'none',
               borderRadius: 8,
               color: '#fff',
@@ -147,10 +145,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             aria-label="Send message"
             className="active:brightness-90 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             style={{
-              background: isDisabled ? '#1e293b' : '#3b82f6',
+              background: isDisabled ? 'var(--surface-2)' : 'var(--accent)',
               border: 'none',
               borderRadius: 8,
-              color: isDisabled ? '#475569' : '#fff',
+              color: isDisabled ? 'var(--text-tertiary)' : '#fff',
               cursor: isDisabled ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -161,10 +159,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
               transition: 'background 0.15s, color 0.15s, filter 0.15s',
             }}
             onMouseEnter={(e) => {
-              if (!isDisabled) e.currentTarget.style.background = '#1d4ed8';
+              if (!isDisabled) e.currentTarget.style.background = 'var(--accent-dark)';
             }}
             onMouseLeave={(e) => {
-              if (!isDisabled) e.currentTarget.style.background = '#3b82f6';
+              if (!isDisabled) e.currentTarget.style.background = 'var(--accent)';
             }}
           >
             <svg

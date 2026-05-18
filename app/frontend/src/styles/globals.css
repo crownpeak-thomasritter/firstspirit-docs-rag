@@ -3,23 +3,46 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0a0a0f;
-  --surface-1: #111827;
-  --surface-2: #1e293b;
-  --border: rgba(255, 255, 255, 0.08);
-  --accent: #3b82f6;
-  --accent-dark: #1d4ed8;
-  --accent-glow: rgba(59, 130, 246, 0.3);
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #475569;
-  --user-bubble: #2563eb;
-  --assistant-bubble: #1e293b;
-  --success: #10b981;
-  --danger: #ef4444;
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.12);
-  --warning-border: rgba(245, 158, 11, 0.35);
+  /* ── Crownpeak / FirstSpirit Docs design tokens (light) ─────────── */
+  --bg: #ffffff;
+  --surface-1: #f7f7f8;
+  --surface-2: #e4e7ef;
+  --surface-elev: #ffffff;
+  --border: rgba(26, 22, 22, 0.08);
+  --border-strong: #e4e7ef;
+  --accent: #bd2eff;
+  --accent-dark: #a314e8;
+  --accent-bg: rgba(189, 46, 255, 0.08);
+  --accent-bg-2: rgba(189, 46, 255, 0.16);
+  --accent-glow: rgba(189, 46, 255, 0.28);
+  --text-primary: #1a1616;
+  --text-secondary: #1a16168c;
+  --text-tertiary: #1a161666;
+  --user-bubble: #bd2eff;
+  --assistant-bubble: #f7f7f8;
+  --success: #2f8a52;
+  --success-bg: rgba(47, 138, 82, 0.12);
+  --danger: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.08);
+  --warning: #c2410c;
+  --warning-bg: rgba(194, 65, 12, 0.12);
+  --warning-border: rgba(194, 65, 12, 0.35);
+  /* Code surfaces stay warm-dark so syntax-highlighter onDark still reads
+     well against the light page — matches docs.crownpeak.solutions which
+     keeps code blocks dark on the otherwise-light body. */
+  --code-bg: #161313;
+  --code-header-bg: #1f1b1b;
+  --code-text: #f5f2f0;
+  /* Crownpeak radii: 6 / 10 / 14 / 20 / 28 px */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+  /* Soft layered shadow used on docs.crownpeak.solutions cards */
+  --shadow-card: 0 12px 40px rgba(0, 0, 0, 0.06), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+  --shadow-pop: 0 30px 80px rgba(0, 0, 0, 0.18);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -34,9 +57,10 @@ body,
   padding: 0;
   background-color: var(--bg);
   color: var(--text-primary);
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 15px;
-  line-height: 1.4;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -49,11 +73,11 @@ body,
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--surface-2);
+  background: rgba(26, 22, 22, 0.18);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+  background: rgba(26, 22, 22, 0.32);
 }
 
 /* ── Shimmer skeleton animation ─────────────────────────────────── */
@@ -67,7 +91,7 @@ body,
 }
 
 .skeleton {
-  background: linear-gradient(90deg, #1e293b 25%, #2a3a52 50%, #1e293b 75%);
+  background: linear-gradient(90deg, #ececef 25%, #f5f5f7 50%, #ececef 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite linear;
   border-radius: 6px;
@@ -77,7 +101,7 @@ body,
 .app-layout {
   display: flex;
   height: 100vh;
-  background: #0a0a0f;
+  background: var(--bg);
   overflow: hidden;
   position: relative;
 }
@@ -98,8 +122,8 @@ body,
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #111827;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
@@ -109,10 +133,10 @@ body,
   top: 12px;
   left: 12px;
   z-index: 20;
-  background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #f1f5f9;
+  color: var(--text-primary);
   cursor: pointer;
   padding: 8px;
   align-items: center;
@@ -123,7 +147,7 @@ body,
 .sidebar-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(26, 22, 22, 0.45);
   z-index: 15;
 }
 
@@ -135,7 +159,7 @@ body,
     height: 100%;
     z-index: 20;
     transform: translateX(-260px);
-    transition: transform 0.25s ease;
+    transition: transform 0.25s var(--ease-standard);
   }
 
   .sidebar-container.open {
@@ -165,7 +189,7 @@ body,
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--text-secondary);
+  background: var(--text-tertiary);
   animation: typing-dot 1.2s infinite ease-in-out;
 }
 
@@ -181,13 +205,8 @@ body,
   outline: none;
 }
 
-.chat-textarea:focus ~ * {
-  /* sibling trick — actual focus ring on the wrapper */
-}
-
-/* Focus ring is on the parent wrapper via :focus-within */
 .chat-input-wrapper:focus-within {
-  box-shadow: 0 0 0 2px #3b82f6;
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 @keyframes spin {
@@ -234,19 +253,27 @@ body,
 .assistant-content h2,
 .assistant-content h3 {
   font-weight: 600;
-  margin: 0.75em 0 0.4em;
-  line-height: 1.3;
+  margin: 0.9em 0 0.4em;
+  line-height: 1.25;
+  letter-spacing: -0.018em;
+  color: var(--text-primary);
+}
+.assistant-content a {
+  color: var(--accent-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .assistant-content code:not(pre code) {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-family: "Geist Mono", "JetBrains Mono", "Fira Code", monospace;
   font-size: 13px;
-  background: rgba(255, 255, 255, 0.08);
-  padding: 2px 5px;
+  background: rgba(26, 22, 22, 0.06);
+  color: var(--text-primary);
+  padding: 1px 5px;
   border-radius: 4px;
 }
 .assistant-content pre {
   margin: 0.75em 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .assistant-content strong {
@@ -256,24 +283,20 @@ body,
   font-style: italic;
 }
 .assistant-content blockquote {
-  border-left: 3px solid #3b82f6;
+  border-left: 3px solid var(--accent);
   margin: 0 0 0.75em;
   padding: 4px 12px;
-  color: #94a3b8;
+  color: var(--text-secondary);
 }
 
-/* ── Video card hover ──────────────────────────────────────────── */
-.video-card-hover {
-  border-color: #3b82f6;
-}
-
-/* ── Code block wrapper ─────────────────────────────────────────── */
+/* ── Code block wrapper (kept dark on light page, like the docs site) ─ */
 .code-block-wrapper {
   position: relative;
   margin: 0.75em 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: #0d1117;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
 }
 
 .code-block-header {
@@ -281,34 +304,43 @@ body,
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px;
-  background: #161b22;
+  background: var(--code-header-bg);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .code-lang-label {
-  font-family: "JetBrains Mono", monospace;
+  font-family: "Geist Mono", "JetBrains Mono", monospace;
   font-size: 12px;
-  color: #94a3b8;
+  color: rgba(245, 242, 240, 0.6);
   text-transform: lowercase;
+  letter-spacing: 0.02em;
 }
 
 .copy-btn {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;
-  color: #94a3b8;
+  color: rgba(245, 242, 240, 0.7);
   cursor: pointer;
   font-size: 11px;
   padding: 3px 8px;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s var(--ease-standard), color 0.15s var(--ease-standard);
 }
 
 .copy-btn:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: #f1f5f9;
+  color: var(--code-text);
 }
 
 .copy-btn.copied {
-  color: #10b981;
-  border-color: #10b981;
+  color: #6cd699;
+  border-color: #6cd699;
+}
+
+/* ── Display type — Instrument Serif accent ─────────────────────── */
+.brand-serif {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  font-style: italic;
 }

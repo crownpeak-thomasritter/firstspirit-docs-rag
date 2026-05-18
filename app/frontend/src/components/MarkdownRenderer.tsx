@@ -55,9 +55,9 @@ function CodeBlock({ language, code }: CodeBlockProps) {
           customStyle={{
             margin: 0,
             borderRadius: 0,
-            background: '#0d1117',
+            background: 'var(--code-bg)',
             fontSize: 13,
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            fontFamily: '"Geist Mono", "JetBrains Mono", "Fira Code", monospace',
           }}
         >
           {code}
@@ -67,11 +67,11 @@ function CodeBlock({ language, code }: CodeBlockProps) {
           style={{
             margin: 0,
             padding: '12px 16px',
-            background: '#0d1117',
+            background: 'var(--code-bg)',
             fontSize: 13,
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            fontFamily: '"Geist Mono", "JetBrains Mono", "Fira Code", monospace',
             overflowX: 'auto',
-            color: '#f1f5f9',
+            color: '#f7f7f8',
           }}
         >
           <code>{code}</code>
@@ -104,11 +104,12 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         <code
           className={className}
           style={{
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            fontFamily: '"Geist Mono", "JetBrains Mono", "Fira Code", monospace',
             fontSize: 13,
-            background: 'rgba(255,255,255,0.08)',
+            background: 'var(--accent-bg)',
             padding: '2px 5px',
             borderRadius: 4,
+            color: 'var(--accent-dark)',
           }}
           {...props}
         >

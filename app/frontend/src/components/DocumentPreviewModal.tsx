@@ -37,7 +37,7 @@ export function DocumentPreviewModal({ citation, onClose }: DocumentPreviewModal
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
+      className="fixed inset-0 bg-[rgba(26,22,22,0.45)] z-50 flex items-center justify-center"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -46,23 +46,23 @@ export function DocumentPreviewModal({ citation, onClose }: DocumentPreviewModal
       aria-label="Document citation"
     >
       <div
-        className="bg-slate-800 border border-white/10 rounded-xl p-6 w-[720px] max-w-[calc(100vw-48px)] max-h-[90vh] flex flex-col shadow-2xl"
+        className="bg-[var(--surface-1)] border border-[var(--border)] rounded-xl p-6 w-[720px] max-w-[calc(100vw-48px)] max-h-[90vh] flex flex-col shadow-[var(--shadow-card)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-start mb-4 gap-4">
           <div className="min-w-0">
-            <h3 className="text-slate-100 text-base font-semibold m-0 break-words">
+            <h3 className="text-[var(--text-primary)] text-base font-semibold m-0 break-words">
               {citation.document_title}
             </h3>
             {citation.section_path?.length ? (
-              <p className="text-slate-400 text-xs m-0 mt-0.5 break-words">
+              <p className="text-[var(--text-secondary)] text-xs m-0 mt-0.5 break-words">
                 {citation.section_path.join(' › ')}
               </p>
             ) : null}
           </div>
           <button
             onClick={onClose}
-            className="bg-none border-none text-slate-400 cursor-pointer text-xl leading-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+            className="bg-none border-none text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer text-xl leading-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
             aria-label="Close"
           >
             ×
@@ -70,13 +70,13 @@ export function DocumentPreviewModal({ citation, onClose }: DocumentPreviewModal
         </div>
 
         <div className="flex-1 min-h-0 mb-4 overflow-y-auto">
-          <pre className="whitespace-pre-wrap break-words text-slate-200 text-sm leading-relaxed font-sans m-0">
+          <pre className="whitespace-pre-wrap break-words text-[var(--text-primary)] text-sm leading-relaxed font-sans m-0">
             {citation.content}
           </pre>
         </div>
 
         <div className="flex justify-between items-center gap-4">
-          <span className="text-slate-500 text-xs truncate" title={breadcrumb}>
+          <span className="text-[var(--text-tertiary)] text-xs truncate" title={breadcrumb}>
             {breadcrumb}
           </span>
           {externalUrl ? (
@@ -84,7 +84,7 @@ export function DocumentPreviewModal({ citation, onClose }: DocumentPreviewModal
               href={externalUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-slate-400 hover:text-slate-200 text-xs flex items-center gap-1 transition-colors shrink-0"
+              className="text-[var(--text-secondary)] hover:text-[var(--accent)] text-xs flex items-center gap-1 transition-colors shrink-0"
             >
               Open source
               <svg

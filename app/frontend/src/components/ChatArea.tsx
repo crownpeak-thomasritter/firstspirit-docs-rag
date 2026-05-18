@@ -85,17 +85,26 @@ function EmptyState({ onStarterClick }: EmptyStateProps) {
         height="56"
         viewBox="0 0 56 56"
         fill="none"
-        stroke="#3b82f6"
+        stroke="currentColor"
         strokeWidth="1.5"
-        style={{ marginBottom: 20, opacity: 0.7 }}
+        style={{ marginBottom: 20, opacity: 0.7, color: 'var(--accent)' }}
       >
         <circle cx="28" cy="28" r="24" />
         <path d="M18,22 L38,22 M18,28 L34,28 M18,34 L30,34" strokeLinecap="round" />
       </svg>
-      <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 600, color: '#f1f5f9' }}>
+      <h2
+        style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 600, color: 'var(--text-primary)' }}
+      >
         Ask anything about FirstSpirit
       </h2>
-      <p style={{ margin: '0 0 24px', color: '#94a3b8', maxWidth: 380, lineHeight: 1.6 }}>
+      <p
+        style={{
+          margin: '0 0 24px',
+          color: 'var(--text-secondary)',
+          maxWidth: 380,
+          lineHeight: 1.6,
+        }}
+      >
         This AI has access to the FirstSpirit / Crownpeak documentation library. Answers cite the
         exact section in the source document.
       </p>
@@ -108,24 +117,24 @@ function EmptyState({ onStarterClick }: EmptyStateProps) {
             onClick={() => onStarterClick(q)}
             style={{
               padding: '10px 16px',
-              background: '#1e293b',
+              background: 'var(--surface-1)',
               borderRadius: 10,
-              border: '1px solid rgba(255,255,255,0.06)',
-              color: '#94a3b8',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
               fontSize: 14,
               cursor: 'pointer',
               textAlign: 'left',
               transition: 'background 0.15s, border-color 0.15s, color 0.15s',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(30,41,59,0.9)';
-              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.3)';
-              e.currentTarget.style.color = '#f1f5f9';
+              e.currentTarget.style.background = 'rgba(26,22,22,0.05)';
+              e.currentTarget.style.borderColor = 'var(--accent)';
+              e.currentTarget.style.color = 'var(--text-primary)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
-              e.currentTarget.style.color = '#94a3b8';
+              e.currentTarget.style.background = 'var(--surface-1)';
+              e.currentTarget.style.borderColor = 'var(--border)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
             }}
           >
             {q}
@@ -150,14 +159,14 @@ function LoadErrorState({ message, onRetry }: { message: string; onRetry: () => 
         textAlign: 'center',
       }}
     >
-      <p style={{ color: '#ef4444', marginBottom: 16 }}>{message}</p>
+      <p style={{ color: 'var(--danger)', marginBottom: 16 }}>{message}</p>
       <button
         onClick={onRetry}
         style={{
-          background: '#1e293b',
-          border: '1px solid rgba(255,255,255,0.1)',
+          background: 'var(--surface-1)',
+          border: '1px solid var(--border)',
           borderRadius: 8,
-          color: '#f1f5f9',
+          color: 'var(--text-primary)',
           cursor: 'pointer',
           padding: '8px 20px',
           fontSize: 14,
@@ -186,16 +195,25 @@ function ConversationNotFound({ onBack }: { onBack: () => void }) {
         textAlign: 'center',
       }}
     >
-      <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 600, color: '#f1f5f9' }}>
+      <h2
+        style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 600, color: 'var(--text-primary)' }}
+      >
         Conversation not found
       </h2>
-      <p style={{ margin: '0 0 20px', color: '#94a3b8', maxWidth: 400, lineHeight: 1.6 }}>
+      <p
+        style={{
+          margin: '0 0 20px',
+          color: 'var(--text-secondary)',
+          maxWidth: 400,
+          lineHeight: 1.6,
+        }}
+      >
         This conversation doesn&apos;t exist or you don&apos;t have access to it.
       </p>
       <button
         onClick={onBack}
         style={{
-          background: '#3b82f6',
+          background: 'var(--accent)',
           border: 'none',
           borderRadius: 8,
           color: '#fff',
@@ -236,23 +254,23 @@ function InlineError({ message, onRetry }: InlineErrorProps) {
         height="16"
         viewBox="0 0 16 16"
         fill="none"
-        stroke="#ef4444"
+        stroke="var(--danger)"
         strokeWidth="1.8"
         strokeLinecap="round"
         style={{ flexShrink: 0 }}
       >
         <circle cx="8" cy="8" r="7" />
         <line x1="8" y1="5" x2="8" y2="8.5" />
-        <circle cx="8" cy="11" r="0.5" fill="#ef4444" stroke="none" />
+        <circle cx="8" cy="11" r="0.5" fill="var(--danger)" stroke="none" />
       </svg>
-      <p style={{ flex: 1, margin: 0, fontSize: 14, color: '#f1f5f9' }}>{message}</p>
+      <p style={{ flex: 1, margin: 0, fontSize: 14, color: 'var(--text-primary)' }}>{message}</p>
       <button
         onClick={onRetry}
         style={{
           background: 'transparent',
           border: '1px solid rgba(239,68,68,0.5)',
           borderRadius: 6,
-          color: '#ef4444',
+          color: 'var(--danger)',
           cursor: 'pointer',
           fontSize: 13,
           padding: '5px 12px',
@@ -261,11 +279,11 @@ function InlineError({ message, onRetry }: InlineErrorProps) {
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = 'rgba(239,68,68,0.15)';
-          e.currentTarget.style.color = '#f1f5f9';
+          e.currentTarget.style.color = 'var(--text-primary)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = '#ef4444';
+          e.currentTarget.style.color = 'var(--danger)';
         }}
       >
         Retry
@@ -638,10 +656,10 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
               position: 'absolute',
               top: 12,
               right: 24,
-              background: '#1e293b',
-              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'var(--surface-1)',
+              border: '1px solid var(--border)',
               borderRadius: 7,
-              color: '#94a3b8',
+              color: 'var(--text-secondary)',
               cursor: 'pointer',
               padding: '5px 8px',
               display: 'flex',
@@ -652,12 +670,12 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
               transition: 'background 0.15s, color 0.15s',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.color = '#f1f5f9';
+              e.currentTarget.style.background = 'var(--surface-1)';
+              e.currentTarget.style.color = 'var(--text-primary)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#1e293b';
-              e.currentTarget.style.color = '#94a3b8';
+              e.currentTarget.style.background = 'var(--surface-1)';
+              e.currentTarget.style.color = 'var(--text-secondary)';
             }}
           >
             <svg
@@ -740,7 +758,7 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
           left: 0,
           right: 0,
           height: 120,
-          background: 'linear-gradient(to bottom, transparent, #0a0a0f)',
+          background: 'linear-gradient(to bottom, transparent, var(--bg))',
           pointerEvents: 'none',
           zIndex: 1,
         }}

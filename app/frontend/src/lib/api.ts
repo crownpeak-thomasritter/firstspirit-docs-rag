@@ -172,7 +172,7 @@ export interface SyncRun {
 }
 
 export interface SyncRunsResponse {
-  runs: SyncRun[];
+  sync_runs: SyncRun[];
 }
 
 export interface AdminDocumentRow extends Document {
