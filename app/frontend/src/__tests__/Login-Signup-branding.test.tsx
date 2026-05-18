@@ -1,17 +1,12 @@
 /**
- * Tests for Login and Signup page branding header.
- *
- * Verifies that the branding header (logo, title, tagline) is rendered
- * consistently on both pages, and that the forms render correctly.
+ * Tests for Login page branding header and form.
  */
 
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { Login } from '../pages/Login';
-import { Signup } from '../pages/Signup';
 
-// Mock useAuth to provide a valid context
 vi.mock('../hooks/useAuth', () => ({
   useAuth: () => ({
     status: 'anon',
@@ -24,7 +19,6 @@ vi.mock('../hooks/useAuth', () => ({
   }),
 }));
 
-// Mock authApi module to avoid network calls
 vi.mock('../lib/authApi', () => ({
   AuthError: class AuthError extends Error {
     status: number;
@@ -35,31 +29,31 @@ vi.mock('../lib/authApi', () => ({
       this.rateLimitScope = rateLimitScope;
     }
   },
-  login: vi.fn().mockResolvedValue({ id: 'test', email: 'test@test' }),
-  signup: vi.fn().mockResolvedValue({ id: 'test', email: 'test@test' }),
+  login: vi.fn().mockResolvedValue({ id: 'admin', email: 'admin' }),
+  signup: vi.fn().mockRejectedValue(new Error('Signup is disabled')),
   logout: vi.fn().mockResolvedValue(undefined),
   me: vi.fn().mockResolvedValue({
-    id: 'test',
-    email: 'test@test',
-    is_admin: false,
+    id: 'admin',
+    email: 'admin',
+    is_admin: true,
     messages_used_today: 0,
-    messages_remaining_today: 25,
+    messages_remaining_today: 999,
     rate_window_resets_at: null,
   }),
 }));
 
-const brandingText = "Ask Cole Medin's YouTube videos and Dynamous lessons anything";
+const brandingText = 'Ask the FirstSpirit & Crownpeak documentation anything';
 
 describe('Login page', () => {
-  it('renders branding header with logo, title, and tagline', () => {
+  it('renders branding header with title and tagline', () => {
     render(
       <MemoryRouter>
         <Login />
       </MemoryRouter>,
     );
 
-    expect(screen.getByAltText('DynaChat logo')).toBeInTheDocument();
-    expect(screen.getByText('DynaChat')).toBeInTheDocument();
+    expect(screen.getByText('FirstSpirit')).toBeInTheDocument();
+    expect(screen.getByText('Docs')).toBeInTheDocument();
     expect(screen.getByText(brandingText)).toBeInTheDocument();
   });
 
@@ -71,86 +65,18 @@ describe('Login page', () => {
     );
 
     expect(screen.getByRole('heading', { name: /log in/i })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /email/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /username/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /log in/i })).toBeInTheDocument();
   });
 
-  it('renders a link to the signup page', () => {
+  it('does not render a sign-up link', () => {
     render(
       <MemoryRouter>
         <Login />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('link', { name: /sign up/i })).toHaveAttribute('href', '/signup');
-  });
-});
-
-describe('Signup page', () => {
-  it('renders branding header with logo, title, and tagline', () => {
-    render(
-      <MemoryRouter>
-        <Signup />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByAltText('DynaChat logo')).toBeInTheDocument();
-    expect(screen.getByText('DynaChat')).toBeInTheDocument();
-    expect(screen.getByText(brandingText)).toBeInTheDocument();
-  });
-
-  it('renders the signup form with all required fields', () => {
-    render(
-      <MemoryRouter>
-        <Signup />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole('heading', { name: /create account/i })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /email/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign up/i })).toBeInTheDocument();
-  });
-
-  it('renders a link to the login page', () => {
-    render(
-      <MemoryRouter>
-        <Signup />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole('link', { name: /log in/i })).toHaveAttribute('href', '/login');
-  });
-});
-
-describe('Login and Signup branding consistency', () => {
-  it('both pages render identical branding structure', () => {
-    const { container: loginContainer } = render(
-      <MemoryRouter>
-        <Login />
-      </MemoryRouter>,
-    );
-    const { container: signupContainer } = render(
-      <MemoryRouter>
-        <Signup />
-      </MemoryRouter>,
-    );
-
-    // Both should have the logo img with same alt text
-    const loginLogo = loginContainer.querySelector('img[alt="DynaChat logo"]');
-    const signupLogo = signupContainer.querySelector('img[alt="DynaChat logo"]');
-    expect(loginLogo).toBeInTheDocument();
-    expect(signupLogo).toBeInTheDocument();
-
-    // Both should have DynaChat title
-    const loginTitle = loginContainer.querySelector('.text-xl.font-semibold');
-    const signupTitle = signupContainer.querySelector('.text-xl.font-semibold');
-    expect(loginTitle?.textContent).toBe('DynaChat');
-    expect(signupTitle?.textContent).toBe('DynaChat');
-
-    // Both should have the tagline
-    expect(loginContainer.textContent).toContain(brandingText);
-    expect(signupContainer.textContent).toContain(brandingText);
+    expect(screen.queryByRole('link', { name: /sign up/i })).not.toBeInTheDocument();
   });
 });

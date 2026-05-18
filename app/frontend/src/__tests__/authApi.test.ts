@@ -1,77 +1,59 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { me } from '../lib/authApi';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { AuthError, login, logout, me } from '../lib/authApi';
 
-describe('me() dedup', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
+const SESSION_KEY = 'fs_docs_session';
+
+describe('me()', () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it('resolves with admin user when session exists', async () => {
+    localStorage.setItem(SESSION_KEY, '1');
+    const user = await me();
+    expect(user.id).toBe('admin');
+    expect(user.is_admin).toBe(true);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
+  it('rejects with 401 when no session', async () => {
+    await expect(me()).rejects.toBeInstanceOf(AuthError);
+    await me().catch((e: AuthError) => expect(e.status).toBe(401));
   });
 
-  function deferredJson(body: unknown, status = 200) {
-    let resolveFn!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      resolveFn = resolve;
-    });
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
-      await gate;
-      return {
-        ok: status >= 200 && status < 300,
-        status,
-        statusText: 'OK',
-        json: async () => body,
-        text: async () => JSON.stringify(body),
-      };
-    });
-    return { release: resolveFn };
-  }
-
-  it('coalesces concurrent callers into a single fetch (regression for issue #115)', async () => {
-    const { release } = deferredJson({
-      id: 'u1',
-      email: 'a@b.com',
-      is_admin: false,
-      messages_used_today: 0,
-      messages_remaining_today: 25,
-      rate_window_resets_at: null,
-    });
-
-    const callers = [me(), me(), me(), me(), me(), me(), me()];
-
-    // Every caller shares the same promise while the fetch is in flight.
+  it('coalesces concurrent callers into a single promise', () => {
+    localStorage.setItem(SESSION_KEY, '1');
+    const callers = [me(), me(), me()];
     expect(callers.every((p) => p === callers[0])).toBe(true);
-
-    release();
-    await Promise.all(callers);
-
-    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('re-fetches after the previous call settles', async () => {
-    const first = deferredJson({
-      id: 'u1',
-      email: 'a@b.com',
-      is_admin: false,
-      messages_used_today: 0,
-      messages_remaining_today: 25,
-      rate_window_resets_at: null,
-    });
-    first.release();
-    await me();
-    expect(fetch).toHaveBeenCalledTimes(1);
+  it('creates a fresh promise after the previous call settles', async () => {
+    localStorage.setItem(SESSION_KEY, '1');
+    const first = me();
+    await first;
+    const second = me();
+    expect(second).not.toBe(first);
+    await second;
+  });
+});
 
-    const second = deferredJson({
-      id: 'u1',
-      email: 'a@b.com',
-      is_admin: false,
-      messages_used_today: 1,
-      messages_remaining_today: 24,
-      rate_window_resets_at: null,
-    });
-    second.release();
-    await me();
-    expect(fetch).toHaveBeenCalledTimes(2);
+describe('login()', () => {
+  afterEach(() => localStorage.clear());
+
+  it('stores session and resolves on admin/admin', async () => {
+    const user = await login('admin', 'admin');
+    expect(user.id).toBe('admin');
+    expect(localStorage.getItem(SESSION_KEY)).toBe('1');
+  });
+
+  it('rejects with 401 on wrong credentials', async () => {
+    await expect(login('admin', 'wrong')).rejects.toBeInstanceOf(AuthError);
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+  });
+});
+
+describe('logout()', () => {
+  it('clears the session', async () => {
+    localStorage.setItem(SESSION_KEY, '1');
+    await logout();
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
   });
 });

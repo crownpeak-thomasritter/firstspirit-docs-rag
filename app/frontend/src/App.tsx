@@ -7,7 +7,6 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { AdminDocuments } from './pages/AdminDocuments';
 import { Login } from './pages/Login';
 import { NotFound } from './pages/NotFound';
-import { Signup } from './pages/Signup';
 
 // ── Auth guard ───────────────────────────────────────────────────
 interface RequireAuthProps {
@@ -101,7 +100,7 @@ function App() {
         <ToastProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
+            <Route path="/signup" element={<Navigate to="/login" replace />} />
             <Route
               path="/"
               element={

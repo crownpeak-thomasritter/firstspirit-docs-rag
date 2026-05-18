@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react';
-import { Link, type Location, useLocation, useNavigate } from 'react-router-dom';
+import { type Location, useLocation, useNavigate } from 'react-router-dom';
 import { BrandingHeader } from '../components/BrandingHeader';
 import { useAuth } from '../hooks/useAuth';
 
@@ -8,7 +8,7 @@ interface LocationStateWithFrom {
 }
 
 export function Login() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -23,7 +23,7 @@ export function Login() {
     setFormError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(username, password);
       navigate(returnTo, { replace: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
@@ -42,13 +42,13 @@ export function Login() {
       >
         <h1 className="text-xl font-semibold">Log in</h1>
         <label className="block text-sm">
-          <span className="text-[var(--text-secondary)]">Email</span>
+          <span className="text-[var(--text-secondary)]">Username</span>
           <input
-            type="email"
+            type="text"
             required
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             className="mt-1 w-full px-3 py-2 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           />
         </label>
@@ -75,12 +75,6 @@ export function Login() {
         >
           {submitting ? 'Logging in…' : 'Log in'}
         </button>
-        <div className="text-sm text-[var(--text-secondary)] text-center">
-          Need an account?{' '}
-          <Link to="/signup" className="text-[var(--accent)] hover:underline">
-            Sign up
-          </Link>
-        </div>
       </form>
     </div>
   );
