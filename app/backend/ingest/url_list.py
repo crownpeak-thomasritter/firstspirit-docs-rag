@@ -285,9 +285,7 @@ async def _ingest_one_url(url: str, *, source_type: str) -> tuple[str, str | Non
         if newly_created:
             await repository.delete_document_cascade(document_id)
         else:
-            await repository.replace_chunks_for_document(
-                document_id, [], source_type=source_type
-            )
+            await repository.replace_chunks_for_document(document_id, [], source_type=source_type)
             await repository.clear_document_crawl_state(document_id)
         raise
 

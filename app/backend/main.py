@@ -99,11 +99,12 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-from backend.routes import conversations, messages, sources  # noqa: E402
+from backend.routes import conversations, feedback, messages, sources  # noqa: E402
 
 app.include_router(sources.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ __all__ = [
     "count_documents",
     "create_conversation",
     "create_document",
+    "create_feedback",
     "create_message",
     "create_sync_item",
     "create_sync_run",
@@ -44,6 +45,9 @@ __all__ = [
     "get_document",
     "get_document_by_content_path",
     "get_document_by_url",
+    "get_feedback_by_id",
+    "get_feedback_for_message",
+    "get_message_with_conversation",
     "list_chunks_for_document",
     "list_conversations",
     "list_documents",
@@ -57,6 +61,7 @@ __all__ = [
     "touch_conversation",
     "update_conversation_title",
     "update_document_crawl_metadata",
+    "update_feedback_issue_url",
     "update_sync_item_outcome",
     "update_sync_run",
 ]
@@ -595,12 +600,23 @@ async def create_message(
 
 
 async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
-    """Return messages only if the conversation belongs to *user_id*."""
+    """Return messages only if the conversation belongs to *user_id*.
+
+    Each row is hydrated with ``sources`` (JSON-decoded) and a
+    ``feedback_submitted`` boolean — true when at least one
+    ``feedback_submissions`` row references the message. The frontend uses
+    this to swap the "Report this answer" button for a "Reported" badge
+    across reloads without an extra round-trip.
+    """
     async with _acquire() as conn:
         rows = await _fetchall(
             conn,
             """
-            SELECT m.*
+            SELECT m.*,
+                   EXISTS(
+                       SELECT 1 FROM feedback_submissions f
+                       WHERE f.message_id = m.id
+                   ) AS feedback_submitted
             FROM messages m
             JOIN conversations c ON c.id = m.conversation_id
             WHERE m.conversation_id = ? AND c.user_id = ?
@@ -610,6 +626,7 @@ async def list_messages(conversation_id: str, user_id: str) -> list[dict]:
         )
     for d in rows:
         d["sources"] = json.loads(d["sources"]) if d.get("sources") else None
+        d["feedback_submitted"] = bool(d.get("feedback_submitted"))
     return rows
 
 
@@ -763,3 +780,138 @@ async def list_sync_items_for_run(sync_run_id: str) -> list[dict]:
             (sync_run_id,),
         )
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Feedback submissions
+# ---------------------------------------------------------------------------
+
+
+async def get_message_with_conversation(message_id: str, user_id: str) -> dict | None:
+    """Return the message row only if its conversation belongs to *user_id*.
+
+    Used by the feedback route to validate ownership in a single round trip
+    before reconstructing the Q/A snapshot.
+    """
+    async with _acquire() as conn:
+        row = await _fetchone(
+            conn,
+            """
+            SELECT m.id, m.conversation_id, m.role, m.content, m.sources, m.created_at
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.id = ? AND c.user_id = ?
+            """,
+            (message_id, user_id),
+        )
+    if row and isinstance(row.get("sources"), str):
+        row["sources"] = json.loads(row["sources"]) if row["sources"] else None
+    return row
+
+
+async def create_feedback(
+    *,
+    message_id: str,
+    conversation_id: str,
+    user_id: str,
+    suggested_correction: str,
+    payload_json: str,
+) -> dict | None:
+    """Insert a feedback row. Returns ``None`` if the target message does not
+    exist, is not an assistant message, or its conversation does not belong
+    to *user_id* — enforced at the SQL layer via a guarded EXISTS subquery
+    so a buggy caller cannot side-step ownership.
+    """
+    feedback_id = _new_id()
+    now = _now()
+    async with _acquire() as conn:
+        async with conn.execute(
+            """
+            INSERT INTO feedback_submissions (
+                id, message_id, conversation_id,
+                suggested_correction, payload_json,
+                github_issue_url, status, created_at
+            )
+            SELECT ?, ?, ?, ?, ?, NULL, 'submitted', ?
+            WHERE EXISTS (
+                SELECT 1 FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.id = ?
+                  AND m.conversation_id = ?
+                  AND m.role = 'assistant'
+                  AND c.user_id = ?
+            )
+            """,
+            (
+                feedback_id,
+                message_id,
+                conversation_id,
+                suggested_correction,
+                payload_json,
+                now,
+                message_id,
+                conversation_id,
+                user_id,
+            ),
+        ) as cur:
+            inserted = cur.rowcount
+        if inserted == 0:
+            return None
+    return {
+        "id": feedback_id,
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+        "suggested_correction": suggested_correction,
+        "payload_json": payload_json,
+        "github_issue_url": None,
+        "status": "submitted",
+        "created_at": now,
+    }
+
+
+async def update_feedback_issue_url(
+    feedback_id: str,
+    *,
+    github_issue_url: str | None,
+    status: str,
+) -> bool:
+    """Update the GitHub URL and status of a feedback row after the API call
+    (success → ``issue_filed``, failure → ``issue_failed``).
+    """
+    async with _acquire() as conn:
+        rowcount = await _execute(
+            conn,
+            """
+            UPDATE feedback_submissions
+            SET github_issue_url = ?, status = ?
+            WHERE id = ?
+            """,
+            (github_issue_url, status, feedback_id),
+        )
+    return rowcount > 0
+
+
+async def get_feedback_by_id(feedback_id: str) -> dict | None:
+    async with _acquire() as conn:
+        row = await _fetchone(
+            conn,
+            "SELECT * FROM feedback_submissions WHERE id = ?",
+            (feedback_id,),
+        )
+    return row
+
+
+async def get_feedback_for_message(message_id: str) -> dict | None:
+    """Return the most recent feedback row for a message (or None)."""
+    async with _acquire() as conn:
+        row = await _fetchone(
+            conn,
+            """
+            SELECT * FROM feedback_submissions
+            WHERE message_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (message_id,),
+        )
+    return row

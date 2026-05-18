@@ -17,6 +17,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.config import FEEDBACK_ENABLED, FEEDBACK_GITHUB_TOKEN
 from backend.db import repository
 
 router = APIRouter()
@@ -24,6 +25,11 @@ router = APIRouter()
 
 # Single anonymous identity for the pivot — see module docstring.
 DEFAULT_USER_ID = "default-user"
+
+# Re-export so tests can monkeypatch ``conversations.FEEDBACK_ENABLED``
+# / ``conversations.FEEDBACK_GITHUB_TOKEN`` and have ``get_conversation``
+# pick up the new value on the next call.
+__all__ = ["DEFAULT_USER_ID", "FEEDBACK_ENABLED", "FEEDBACK_GITHUB_TOKEN", "router"]
 
 
 class ConversationCreate(BaseModel):
@@ -60,7 +66,8 @@ async def get_conversation(conv_id: str) -> dict:
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = await repository.list_messages(conv_id, user_id=DEFAULT_USER_ID)
-    return {**conv, "messages": messages}
+    feedback_enabled = bool(FEEDBACK_ENABLED and FEEDBACK_GITHUB_TOKEN)
+    return {**conv, "messages": messages, "feedback_enabled": feedback_enabled}
 
 
 @router.delete("/conversations/{conv_id}", status_code=204)

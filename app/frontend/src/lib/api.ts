@@ -69,10 +69,21 @@ export interface Message {
   created_at: string;
   /** RAG citations — only populated for freshly-streamed assistant messages */
   sources?: Citation[];
+  /**
+   * True when at least one feedback_submissions row references this message.
+   * Set by GET /api/conversations/{id} via a LEFT JOIN; drives the
+   * "Reported — being reviewed" badge on assistant messages.
+   */
+  feedback_submitted?: boolean;
 }
 
 export interface ConversationWithMessages extends Conversation {
   messages: Message[];
+  /**
+   * Computed from FEEDBACK_ENABLED && FEEDBACK_GITHUB_TOKEN on the server.
+   * When false the Report button is hidden everywhere in the UI.
+   */
+  feedback_enabled?: boolean;
 }
 
 /**
@@ -191,8 +202,29 @@ export const syncSources = (body: SyncRequest) =>
 
 export const getSyncRuns = () => request<SyncRunsResponse>('/sources/sync-runs');
 
-export const getSourceDocuments = () =>
-  request<AdminDocumentsResponse>('/sources/documents');
+export const getSourceDocuments = () => request<AdminDocumentsResponse>('/sources/documents');
+
+// Feedback — POST /api/feedback files a GitHub issue per reported answer.
+export interface FeedbackSubmission {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  suggested_correction: string;
+  github_issue_url: string | null;
+  status: 'submitted' | 'issue_filed' | 'issue_failed';
+  created_at: string;
+}
+
+export interface SubmitFeedbackRequest {
+  message_id: string;
+  suggested_correction: string;
+}
+
+export const submitFeedback = (body: SubmitFeedbackRequest) =>
+  request<FeedbackSubmission>('/feedback', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 
 // Health
 export const getHealth = () =>

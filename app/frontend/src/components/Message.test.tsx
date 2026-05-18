@@ -102,3 +102,64 @@ describe('Message — citation chip breadcrumb label', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('Message — feedback affordance', () => {
+  it('renders the Report button on assistant messages when feedbackEnabled', () => {
+    render(
+      <Message
+        role="assistant"
+        content="The answer."
+        isStreaming={false}
+        feedbackEnabled
+        onReportClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /report this answer/i })).toBeInTheDocument();
+  });
+
+  it('renders the Reported badge instead of the button when feedbackSubmitted', () => {
+    render(
+      <Message
+        role="assistant"
+        content="The answer."
+        isStreaming={false}
+        feedbackEnabled
+        feedbackSubmitted
+        onReportClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /report this answer/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/reported — being reviewed/i)).toBeInTheDocument();
+  });
+
+  it('does not render the Report button when feedbackEnabled is false', () => {
+    render(
+      <Message
+        role="assistant"
+        content="The answer."
+        isStreaming={false}
+        onReportClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /report this answer/i })).not.toBeInTheDocument();
+  });
+
+  it('suppresses feedback affordance while the message is streaming', () => {
+    render(
+      <Message
+        role="assistant"
+        content="Partial..."
+        isStreaming
+        feedbackEnabled
+        onReportClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /report this answer/i })).not.toBeInTheDocument();
+  });
+
+  it('never renders feedback affordance on user messages', () => {
+    render(<Message role="user" content="My question" isStreaming={false} feedbackEnabled />);
+    expect(screen.queryByRole('button', { name: /report this answer/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/reported/i)).not.toBeInTheDocument();
+  });
+});

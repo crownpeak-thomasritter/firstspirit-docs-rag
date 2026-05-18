@@ -92,6 +92,15 @@ services:
       CRAWLER_TIMEOUT_SECONDS: ${CRAWLER_TIMEOUT_SECONDS:-30.0}
       DEFAULT_SOURCE_TYPE: ${DEFAULT_SOURCE_TYPE:-firstspirit}
 
+      # --- Feedback (GitHub Issues) ---------------------------------------
+      # Lets users report bad answers as GitHub Issues against the repo
+      # named in FEEDBACK_GITHUB_REPO. The "Report this answer" button is
+      # hidden in the UI until BOTH FEEDBACK_ENABLED=true AND a non-empty
+      # FEEDBACK_GITHUB_TOKEN (PAT with issues:write on the repo) are set.
+      FEEDBACK_ENABLED: ${FEEDBACK_ENABLED:-false}
+      FEEDBACK_GITHUB_REPO: ${FEEDBACK_GITHUB_REPO:-crownpeak-thomasritter/firstspirit-docs-rag}
+      FEEDBACK_GITHUB_TOKEN: ${FEEDBACK_GITHUB_TOKEN:-}
+
       # --- HTTP / CORS -----------------------------------------------------
       # When the bundled frontend is served from the same origin, no CORS
       # headers are needed at all. Override only if you point a separate
