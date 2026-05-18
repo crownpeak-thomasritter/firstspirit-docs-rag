@@ -169,3 +169,33 @@ _cors_raw: str = os.environ.get(
 CORS_ORIGINS: list[str] = [o.strip() for o in _cors_raw.split(",") if o.strip()]
 
 FRONTEND_DIST: str = os.environ.get("FRONTEND_DIST", "")
+
+
+# ---------------------------------------------------------------------------
+# Feedback (GitHub issue reporting)
+# ---------------------------------------------------------------------------
+
+FEEDBACK_ENABLED: bool = os.environ.get("FEEDBACK_ENABLED", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+FEEDBACK_GITHUB_REPO: str = os.environ.get(
+    "FEEDBACK_GITHUB_REPO", "crownpeak-thomasritter/firstspirit-docs-rag"
+)
+FEEDBACK_GITHUB_TOKEN: str = os.environ.get("FEEDBACK_GITHUB_TOKEN", "")
+FEEDBACK_MAX_CORRECTION_CHARS: int = int(os.environ.get("FEEDBACK_MAX_CORRECTION_CHARS", "5000"))
+
+# Retry budget for the GitHub Issues API call (429 / 5xx / transport errors).
+GITHUB_MAX_RETRIES: int = int(os.environ.get("GITHUB_MAX_RETRIES", "4"))
+
+# Not env-driven, but a module constant so the test injector can swap it.
+GITHUB_API_BASE_URL: str = "https://api.github.com"
+
+if FEEDBACK_ENABLED and not FEEDBACK_GITHUB_TOKEN:
+    print(
+        "WARNING: FEEDBACK_ENABLED is on but FEEDBACK_GITHUB_TOKEN is empty — "
+        "feedback will return 503 until a token is provided.",
+        file=sys.stderr,
+    )

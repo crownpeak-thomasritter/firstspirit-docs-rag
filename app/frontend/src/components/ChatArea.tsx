@@ -1,4 +1,4 @@
-import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Location, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
@@ -9,6 +9,7 @@ import { RateLimitError, createConversation } from '../lib/api';
 import { exportConversationAsMarkdown } from '../lib/exportMarkdown';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { DocumentPreviewModal } from './DocumentPreviewModal';
+import { FeedbackModal } from './FeedbackModal';
 import { Message } from './Message';
 
 function formatResetTime(iso: string): string {
@@ -310,9 +311,8 @@ interface ConvLocationState {
 export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaProps) {
   const navigate = useNavigate();
   const location = useLocation() as Location & { state: ConvLocationState | null };
-  const { messages, setMessages, loading, error, notFound, conversation } = useMessages(
-    conversationId || null,
-  );
+  const { messages, setMessages, loading, error, notFound, conversation, feedbackEnabled } =
+    useMessages(conversationId || null);
   const {
     streamingContent,
     streamingSources,
@@ -343,6 +343,20 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
   const pendingUserMsgIdRef = useRef<string | null>(null);
   // Citation modal state
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // Feedback modal state — holds the id of the message being reported, or null.
+  const [feedbackTargetId, setFeedbackTargetId] = useState<string | null>(null);
+  const feedbackTarget = useMemo(
+    () => messages.find((m) => m.id === feedbackTargetId) ?? null,
+    [messages, feedbackTargetId],
+  );
+  const feedbackPrevUserMessage = useMemo(() => {
+    if (!feedbackTarget) return null;
+    const idx = messages.findIndex((m) => m.id === feedbackTarget.id);
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return messages[i];
+    }
+    return null;
+  }, [messages, feedbackTarget]);
 
   // ── Auto-scroll logic ──
   // Defer scroll to the next paint cycle so streaming DOM updates are applied first.
@@ -724,6 +738,11 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
                   content={msg.content}
                   sources={msg.sources}
                   onCitationClick={handleCitationClick}
+                  feedbackEnabled={feedbackEnabled}
+                  feedbackSubmitted={msg.feedback_submitted ?? false}
+                  onReportClick={
+                    msg.role === 'assistant' ? () => setFeedbackTargetId(msg.id) : undefined
+                  }
                 />
               ))
             )}
@@ -788,6 +807,20 @@ export function ChatArea({ conversationId, refreshConversationsRef }: ChatAreaPr
         <DocumentPreviewModal
           citation={selectedCitation}
           onClose={() => setSelectedCitation(null)}
+        />
+      )}
+
+      {feedbackTarget && feedbackPrevUserMessage && (
+        <FeedbackModal
+          message={feedbackTarget}
+          prevUserMessage={feedbackPrevUserMessage}
+          onClose={() => setFeedbackTargetId(null)}
+          onSubmitted={(msgId) => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === msgId ? { ...m, feedback_submitted: true } : m)),
+            );
+            setFeedbackTargetId(null);
+          }}
         />
       )}
     </div>

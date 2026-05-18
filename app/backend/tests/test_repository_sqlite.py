@@ -86,6 +86,19 @@ async def _apply_initial_schema() -> None:
                 error_message TEXT,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS feedback_submissions (
+                id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                suggested_correction TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                github_issue_url TEXT,
+                status TEXT NOT NULL DEFAULT 'submitted'
+                    CHECK (status IN ('submitted', 'issue_filed', 'issue_failed')),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS feedback_submissions_message_id_idx
+                ON feedback_submissions (message_id);
             """
         )
         await conn.commit()
@@ -248,3 +261,168 @@ async def test_search_documents_admin_uses_like(fresh_db):
     rows = await repository.search_documents_admin("odfs")
     assert len(rows) == 1
     assert rows[0]["title"] == "ODFS Reference"
+
+
+# ---------------------------------------------------------------------------
+# Feedback submissions
+# ---------------------------------------------------------------------------
+
+
+async def _seed_conv_with_assistant_message(user_id: str = "u1") -> tuple[dict, dict, dict]:
+    """Helper: conversation + user message + assistant message."""
+    conv = await repository.create_conversation(user_id=user_id, title="C")
+    user_msg = await repository.create_message(
+        conversation_id=conv["id"],
+        user_id=user_id,
+        role="user",
+        content="What is FirstSpirit?",
+    )
+    assert user_msg is not None
+    asst_msg = await repository.create_message(
+        conversation_id=conv["id"],
+        user_id=user_id,
+        role="assistant",
+        content="It's a CMS.",
+    )
+    assert asst_msg is not None
+    return conv, user_msg, asst_msg
+
+
+async def test_create_feedback_persists_and_get_roundtrip(fresh_db):
+    conv, _, asst = await _seed_conv_with_assistant_message()
+    row = await repository.create_feedback(
+        message_id=asst["id"],
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="The correct answer is XYZ.",
+        payload_json='{"question":"q","answer":"a","citations":[]}',
+    )
+    assert row is not None
+    assert row["status"] == "submitted"
+    assert row["github_issue_url"] is None
+    fetched = await repository.get_feedback_by_id(row["id"])
+    assert fetched is not None
+    assert fetched["message_id"] == asst["id"]
+    assert fetched["suggested_correction"] == "The correct answer is XYZ."
+
+
+async def test_create_feedback_returns_none_when_message_missing(fresh_db):
+    conv = await repository.create_conversation(user_id="u1", title="C")
+    row = await repository.create_feedback(
+        message_id="does-not-exist",
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="correction text here.",
+        payload_json="{}",
+    )
+    assert row is None
+
+
+async def test_create_feedback_returns_none_when_message_is_user_role(fresh_db):
+    conv = await repository.create_conversation(user_id="u1", title="C")
+    user_msg = await repository.create_message(
+        conversation_id=conv["id"], user_id="u1", role="user", content="hi"
+    )
+    assert user_msg is not None
+    row = await repository.create_feedback(
+        message_id=user_msg["id"],
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="correction text here.",
+        payload_json="{}",
+    )
+    assert row is None
+
+
+async def test_create_feedback_returns_none_for_wrong_user(fresh_db):
+    conv, _, asst = await _seed_conv_with_assistant_message(user_id="u1")
+    row = await repository.create_feedback(
+        message_id=asst["id"],
+        conversation_id=conv["id"],
+        user_id="someone-else",
+        suggested_correction="correction text here.",
+        payload_json="{}",
+    )
+    assert row is None
+
+
+async def test_update_feedback_issue_url_sets_url_and_status(fresh_db):
+    conv, _, asst = await _seed_conv_with_assistant_message()
+    row = await repository.create_feedback(
+        message_id=asst["id"],
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="correction text here.",
+        payload_json="{}",
+    )
+    assert row is not None
+    updated = await repository.update_feedback_issue_url(
+        row["id"],
+        github_issue_url="https://github.com/o/r/issues/42",
+        status="issue_filed",
+    )
+    assert updated is True
+    fetched = await repository.get_feedback_by_id(row["id"])
+    assert fetched is not None
+    assert fetched["github_issue_url"] == "https://github.com/o/r/issues/42"
+    assert fetched["status"] == "issue_filed"
+
+
+async def test_get_feedback_for_message_returns_latest(fresh_db):
+    conv, _, asst = await _seed_conv_with_assistant_message()
+    first = await repository.create_feedback(
+        message_id=asst["id"],
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="first correction here.",
+        payload_json="{}",
+    )
+    assert first is not None
+    second = await repository.create_feedback(
+        message_id=asst["id"],
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="second correction here.",
+        payload_json="{}",
+    )
+    assert second is not None
+    latest = await repository.get_feedback_for_message(asst["id"])
+    assert latest is not None
+    # created_at uses UTC isoformat; second insert is strictly later.
+    assert latest["id"] in {first["id"], second["id"]}
+
+
+async def test_list_messages_includes_feedback_submitted_flag(fresh_db):
+    conv, _, asst = await _seed_conv_with_assistant_message()
+    before = await repository.list_messages(conv["id"], "u1")
+    assert all(m["feedback_submitted"] is False for m in before)
+
+    await repository.create_feedback(
+        message_id=asst["id"],
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="correction text here.",
+        payload_json="{}",
+    )
+    after = await repository.list_messages(conv["id"], "u1")
+    flags = {m["id"]: m["feedback_submitted"] for m in after}
+    assert flags[asst["id"]] is True
+    # The user message must still report False.
+    user_ids = [m["id"] for m in after if m["role"] == "user"]
+    for uid in user_ids:
+        assert flags[uid] is False
+
+
+async def test_delete_conversation_cascades_feedback(fresh_db):
+    conv, _, asst = await _seed_conv_with_assistant_message()
+    row = await repository.create_feedback(
+        message_id=asst["id"],
+        conversation_id=conv["id"],
+        user_id="u1",
+        suggested_correction="correction text here.",
+        payload_json="{}",
+    )
+    assert row is not None
+    deleted = await repository.delete_conversation(conv["id"], "u1")
+    assert deleted is True
+    assert await repository.get_feedback_by_id(row["id"]) is None

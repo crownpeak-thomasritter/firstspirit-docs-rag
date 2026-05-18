@@ -18,5 +18,10 @@ os.environ.setdefault("QDRANT_API_KEY", "test-qdrant-key")
 os.environ.setdefault("LLM_PROVIDER", "openrouter")
 os.environ.setdefault("EMBEDDING_PROVIDER", "openrouter")
 os.environ.setdefault("JWT_SECRET", "test-secret-please-do-not-use-in-prod")
+# Feedback → GitHub: enable the feature in tests so route handlers wire in
+# end-to-end. Real GitHub calls are mocked at the route boundary.
+os.environ.setdefault("FEEDBACK_ENABLED", "true")
+os.environ.setdefault("FEEDBACK_GITHUB_TOKEN", "test-github-token")
+os.environ.setdefault("FEEDBACK_GITHUB_REPO", "test-owner/test-repo")
 # Skip the polite-crawl sleep in tests.
 os.environ["CRAWLER_REQUEST_DELAY_MS"] = "0"

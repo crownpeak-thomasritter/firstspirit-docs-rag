@@ -11,12 +11,15 @@ export function useMessages(conversationId: string | null) {
   // this user). Surface it as a flag so ChatArea can render a friendly
   // "Conversation not found" UI instead of dumping the raw API error.
   const [notFound, setNotFound] = useState(false);
+  // Server-computed gate for the "Report this answer" affordance.
+  const [feedbackEnabled, setFeedbackEnabled] = useState(false);
 
   useEffect(() => {
     if (!conversationId) {
       setMessages([]);
       setConversation(null);
       setNotFound(false);
+      setFeedbackEnabled(false);
       return;
     }
     setLoading(true);
@@ -31,6 +34,7 @@ export function useMessages(conversationId: string | null) {
           created_at: data.created_at,
           updated_at: data.updated_at,
         });
+        setFeedbackEnabled(data.feedback_enabled ?? false);
       })
       .catch((e) => {
         if (e instanceof ApiError && e.status === 404) {
@@ -43,5 +47,5 @@ export function useMessages(conversationId: string | null) {
       .finally(() => setLoading(false));
   }, [conversationId]);
 
-  return { messages, setMessages, loading, error, notFound, conversation };
+  return { messages, setMessages, loading, error, notFound, conversation, feedbackEnabled };
 }

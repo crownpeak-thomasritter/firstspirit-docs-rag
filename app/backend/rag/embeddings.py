@@ -77,8 +77,7 @@ def _batches_under_caps(texts: list[str]) -> list[list[str]]:
             prepared = _truncate_to_tokens(prepared, _MAX_TOKENS_PER_INPUT)
             n = _MAX_TOKENS_PER_INPUT
         if current and (
-            current_tokens + n > _MAX_TOKENS_PER_REQUEST
-            or len(current) >= _MAX_ITEMS_PER_REQUEST
+            current_tokens + n > _MAX_TOKENS_PER_REQUEST or len(current) >= _MAX_ITEMS_PER_REQUEST
         ):
             batches.append(current)
             current = []

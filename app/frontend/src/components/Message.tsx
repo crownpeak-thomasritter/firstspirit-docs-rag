@@ -18,6 +18,13 @@ interface MessageProps {
   onCitationClick?: (citation: Citation) => void;
   /** Current tool-call status during streaming (ephemeral progress indicator) */
   streamingStatus?: { tool: string; subject: string } | null;
+  /** When true, render the "Report this answer" button below the message. */
+  feedbackEnabled?: boolean;
+  /** When true, the assistant message already has a feedback row — render
+   *  the "Reported — being reviewed" badge instead of the button. */
+  feedbackSubmitted?: boolean;
+  /** Called when the user clicks "Report this answer". */
+  onReportClick?: () => void;
 }
 
 // ── Typing indicator (3 pulsing dots) ────────────────────────────
@@ -154,6 +161,65 @@ function SourceCitations({
   );
 }
 
+// ── Feedback affordance (assistant messages only) ─────────────────
+// Renders either the "Report this answer" button or, post-submit, the
+// "Reported — being reviewed" badge. Lives *below* the markdown body so
+// no-citation refusal answers can still be reported.
+function FeedbackAction({
+  feedbackEnabled,
+  feedbackSubmitted,
+  onReportClick,
+}: {
+  feedbackEnabled: boolean;
+  feedbackSubmitted: boolean;
+  onReportClick?: () => void;
+}) {
+  if (feedbackSubmitted) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] mt-2">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <polyline points="2.5,6.5 5,9 9.5,3" />
+        </svg>
+        Reported — being reviewed
+      </span>
+    );
+  }
+  if (!feedbackEnabled || !onReportClick) return null;
+  return (
+    <button
+      type="button"
+      onClick={onReportClick}
+      className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] mt-2 cursor-pointer bg-transparent border-0 p-0 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none"
+    >
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M2.5,1.5 L2.5,10.5" />
+        <path d="M2.5,2 C5,1 7,3 9.5,2 L9.5,6 C7,7 5,5 2.5,6 Z" />
+      </svg>
+      Report this answer
+    </button>
+  );
+}
+
 // ── Main message component ────────────────────────────────────────
 export function Message({
   role,
@@ -162,9 +228,16 @@ export function Message({
   sources,
   onCitationClick,
   streamingStatus,
+  feedbackEnabled,
+  feedbackSubmitted,
+  onReportClick,
 }: MessageProps) {
   const isUser = role === 'user';
   const hasSources = !isUser && Array.isArray(sources) && sources.length > 0;
+  // Suppress the report affordance while the assistant is still streaming
+  // — the persisted message rerenders with the proper props once the
+  // stream completes.
+  const showFeedback = !isUser && !isStreaming && !!content;
 
   return (
     <div
@@ -201,6 +274,13 @@ export function Message({
           <>
             <MarkdownRenderer content={content} />
             {hasSources && <SourceCitations sources={sources} onCitationClick={onCitationClick} />}
+            {showFeedback && (
+              <FeedbackAction
+                feedbackEnabled={feedbackEnabled ?? false}
+                feedbackSubmitted={feedbackSubmitted ?? false}
+                onReportClick={onReportClick}
+              />
+            )}
           </>
         )}
       </div>
