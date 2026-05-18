@@ -14,7 +14,8 @@ build/
 *.log
 node_modules/
 app/frontend/dist/
-app/backend/data/*.db
+app/data/
 .DS_Store
 Thumbs.db
 .archon/logs/
+.claude/settings.local.json
