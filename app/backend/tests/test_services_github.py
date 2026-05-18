@@ -119,6 +119,54 @@ async def test_create_issue_invalid_repo_422_raises_ValueError(install_transport
         await github.create_issue(repo="x/y", token="tk", title="t", body="b", labels=[])
 
 
+async def test_create_issue_persistent_429_raises_retryable_after_budget(
+    monkeypatch, install_transport
+):
+    monkeypatch.setattr(github, "GITHUB_MAX_RETRIES", 3)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, text='{"message":"rate limited"}')
+
+    install_transport(handler)
+
+    with pytest.raises(github.RetryableHTTPError):
+        await github.create_issue(repo="x/y", token="tk", title="t", body="b", labels=[])
+    assert calls["n"] == 3, "must stop after GITHUB_MAX_RETRIES attempts, not loop forever"
+
+
+async def test_create_issue_persistent_500_raises_after_budget(monkeypatch, install_transport):
+    monkeypatch.setattr(github, "GITHUB_MAX_RETRIES", 2)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503, text="upstream down")
+
+    install_transport(handler)
+
+    with pytest.raises(github.RetryableHTTPError):
+        await github.create_issue(repo="x/y", token="tk", title="t", body="b", labels=[])
+    assert calls["n"] == 2
+
+
+async def test_create_issue_retries_transport_error_then_succeeds(install_transport):
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("transient")
+        return httpx.Response(201, json={"html_url": "https://github.com/x/y/issues/9"})
+
+    install_transport(handler)
+
+    url = await github.create_issue(repo="x/y", token="tk", title="t", body="b", labels=[])
+    assert calls["n"] == 2
+    assert url.endswith("/issues/9")
+
+
 async def test_format_issue_body_wraps_correction_in_fence():
     body = github.format_issue_body(
         question="Q?",

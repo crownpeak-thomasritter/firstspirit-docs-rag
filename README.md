@@ -209,10 +209,11 @@ Visit <http://localhost:5173>. The Vite proxy forwards `/api/*` to the backend o
 | `GET` | `/api/conversations` | List conversations |
 | `POST` | `/api/conversations` | Create a conversation |
 | `GET` | `/api/conversations/search?q=...` | Title-contains search |
-| `GET` | `/api/conversations/{id}` | Conversation + messages |
+| `GET` | `/api/conversations/{id}` | Conversation + messages. Response also includes `feedback_enabled: bool` so the frontend can show/hide the "Report this answer" button |
 | `PATCH` | `/api/conversations/{id}` | Rename |
 | `DELETE` | `/api/conversations/{id}` | Delete |
 | `POST` | `/api/conversations/{id}/messages` | Send a message; streams the assistant reply over SSE |
+| `POST` | `/api/feedback` | `{"message_id":"...","suggested_correction":"..."}` — files a GitHub Issue against `FEEDBACK_GITHUB_REPO`. Returns 503 when `FEEDBACK_ENABLED=false` or `FEEDBACK_GITHUB_TOKEN` is empty |
 
 ---
 

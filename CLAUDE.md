@@ -257,10 +257,11 @@ bun run tsc --noEmit
 
 SQLite (via `aiosqlite`) is the chat + metadata store. Qdrant Cloud is the vector store. Schema for SQLite is managed by Alembic — on startup the FastAPI lifespan handler runs `alembic upgrade head` before initialising the SQLite layer; the Qdrant collection is ensured separately on lifespan startup via `vector_store.ensure_collection()`. No ORM at runtime — `repository.py` is raw SQL via `aiosqlite`.
 
-**SQLite tables (initial migration):**
+**SQLite tables (managed via Alembic — `alembic upgrade head` on startup):**
 
 - Document corpus: `documents`, `document_chunks` (FK → documents, ON DELETE CASCADE), `source_sync_runs`, `source_sync_items` (FK → source_sync_runs)
 - Chat: `conversations`, `messages` (FK → conversations) — both scoped by `user_id`, which the pivot pins to `"default-user"` via `routes/conversations.DEFAULT_USER_ID`
+- Feedback: `feedback_submissions` — one row per "Report this answer" submission. FK cascades on both `message_id` and `conversation_id`. `payload_json` is a snapshot of the question + answer + citations taken at submit time so the audit trail survives later edits or deletes of the underlying message.
 - `document_chunks` no longer carries `embedding` or `search_vector` columns — vectors live in Qdrant.
 
 **Qdrant collection (default `firstspirit_docs`):**
@@ -334,6 +335,11 @@ All env var reads happen in `app/backend/config.py`. Add new variables there and
 | `CORS_ORIGINS` | No | Comma-separated list. Default permits the same-origin dev server |
 | `FRONTEND_DIST` | No | Absolute path to the built frontend bundle (set automatically by Docker) |
 | `FASTEMBED_CACHE_PATH` | No | Where FastEmbed caches the BM25 ONNX model (compose sets `/app/data/fastembed-cache`) |
+| `FEEDBACK_ENABLED` | No (default `false`) | Master toggle for the "Report this answer" flow. When `false` the route returns 503 and the UI hides the button |
+| `FEEDBACK_GITHUB_REPO` | conditional | `owner/name` of the GitHub repo where feedback issues are filed. Required when feedback is enabled |
+| `FEEDBACK_GITHUB_TOKEN` | conditional | GitHub PAT (classic or fine-grained) with `Issues: read & write` on `FEEDBACK_GITHUB_REPO`. An empty value disables the feature even when `FEEDBACK_ENABLED=true` (a startup warning is printed). See `.env.example` for token-scope guidance |
+| `FEEDBACK_MAX_CORRECTION_CHARS` | No (default `5000`) | Server-side cap on `suggested_correction` length |
+| `GITHUB_MAX_RETRIES` | No (default `4`) | Tenacity retry budget for 429 / 5xx / transport errors when calling the GitHub Issues API |
 
 **Never commit `.env` files.** The root `.env`, every `.env.*`, and `deploy/.env` are all covered by the gitignore rules. `.env.example` is whitelisted via `!.env.example`.
 
